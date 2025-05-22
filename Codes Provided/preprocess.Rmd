@@ -1,0 +1,493 @@
+---
+title: "Preprocess Shadia's Lyrics "
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+# Introduction
+
+We try to investigate in depth the lyrics of one of the most famous and influential female singers in Egypt, namely, شادية. We use statistical, visual, data mining, and exploratory data analysis tools in order to shed light into the artist's career.
+
+Musical lyrics may represent an artist's attitudes, as well as the corresponding composer's and lyricist's perspectives. Lyric analysis is no easy task. Because **it is often structured so differently than prose**, it requires caution with assumptions and careful choice of analytic techniques.
+
+Musical lyrics permeate our lives and influence our thoughts, feelings, and perspectives in very subtle ways. The concept of **Predictive Lyrics** is beginning to take its position in research papers and graduate theses. This case study will just touch on a few pieces of this emerging subject.
+
+Fatma Ahmed Kamal Shaker (فاطمة أحمد كمال شاكر), commonly known as Shadia (شادية) is one of the most popular and influential artists in Egypt and the Arab region. She is considered to be one of the greatest Egyptian singers along with Umm Kulthum (ام كلثوم), Mohamed Abdel Wahab (محمد عبد الوهاب), Mohamed Fawzi (محمد فوزي), and Abd ElHalim Hafez (عبد الحليم حافظ). Shadia was born in 1931 and died in 2017. 
+Six of her movies are listed in the top $100$ Egyptian movies of the 20th century. In April 2015, she became the first actress to be awarded an honorary doctorate by the Egyptian Academy of Arts (citation: @shadiawiki).
+
+The work of Shadia is very diverse including wide range of genres from romanticism, nationalism, spiritual religion, etc. In order to celebrate this inspiring and diverse body of work, we will explore the sometimes obvious, but often hidden, messages in her lyrics. 
+**Lyric analysis** is slowly finding its way into the data science and machine learning communities as the possibility of predicting "Hit Songs" approaches reality.
+
+# Data Collection
+
+1)  The names of all songs are collected using Wikipedia page
+    [https://arz.wikipedia.org/wiki/ليستة_اغانى_شادية](https://arz.wikipedia.org/wiki/ليستة_اغانى_شاديه){.uri}
+
+2)  The lyrics of the corresponding songs were collected using several web sites including:
+-   <https://fnanen.net/klmat/alaghany/sh/shadyt.html> which contains comprehensive sets of lyrics for Arabic artists.
+-   <https://ankawa.com/forum/index.php> which also contains the lyrics of many Arabic songs.
+
+3)  Then, we have listened to all the songs on YouTube to rewrite its lyrics because in the past, they used to write only the words as they are repeated only once neglecting the many repeating as the songs are too long to write.
+
+## Including required libraries.
+```{r}
+library(arabicStemR)
+library(tidytext)
+library(dplyr)
+library(stringi)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+library(wordcloud2)
+library(readr)
+library(scales)
+library(plotly)
+library(data.table)
+library(utf8)
+library(RColorBrewer)
+library(reshape2) 
+library(knitr) # for dynamic reporting
+library(kableExtra) # create a nicely formatted HTML table
+library(formattable) # for the color_tile function
+library(purrr)
+library(fGarch)
+library(fitdistrplus)
+library(patchwork)
+```
+
+# Reading the data
+```{r}
+setwd("/Volumes/Samsung_T5/wg_imhotep/research_and_innovation/Cyber Physical Systems/Tracks/Natural Language Processing/work_in_progress/analysis_of_Shadia_songs")
+DATA_PATH <- "./data/songs.csv"
+STOP_WORDS_PATH <- "./data/stopwords.txt"
+PREPROC_PATH <- "./data/songs_proc.csv"
+PREPROC_SW_PATH <- "./data/ar_stop_complete_list_processed.txt"
+```
+
+Reading the csv file containing Shadia's songs information in the form of comma separated (csv) file. Read the stop words as well
+```{r}
+songs <- read.csv(
+  DATA_PATH, 
+  header = TRUE, 
+  sep = ",", 
+  stringsAsFactors = FALSE, 
+  encoding = "UTF-8", 
+  na.strings = "" # Empty fields are replace by NA.
+)
+
+no_of_songs <- nrow(songs)
+no_of_attributes <- ncol(songs)
+attrs <- names(songs)
+
+my_stopwords <- read.table(
+  STOP_WORDS_PATH, 
+  header = TRUE
+)
+
+colnames(my_stopwords) <- c("Word")
+no_stopwords <- nrow(my_stopwords)
+```
+
+
+```{r}
+#cat("Total number of songs in the dataset: ", no_of_songs, "\n")
+```
+
+
+## Tokenization
+
+Generally, there are different methods and data formats that can be used to **mine** text. 
+Here we use "Tidy Text": a table with one token per row. A token in our context will be a word (or a 1-gram).
+**Tokenization** is therefore the process of splitting the lyrics into tokens. Here we use the R package tidytext's unnest_tokens() to do this.
+
+Processing and mining of natural language text aims at finding the significant words in the given documents. Our first guess might be that the words appearing most frequently in a document are the most significant. 
+However, that intuition is exactly opposite of the truth (you may think of it in terms of information-theoretic principles, that less frequent events carry more information when they occur). 
+The most frequent words include words such as "the" or "and" which help build ideas but do not carry any significance themselves [citation: @rajaraman_mining_2012].
+
+Such words are called **stop words** and have to be filtered out before processing and/or mining the text. 
+So given any language, stop words usually refers to the most common words in a language, however, there is no single universal list of stop words that can be agreed upon by all researchers and practitioners. 
+
+Extract tokens:
+```{r}
+songs <- songs %>%
+  unnest_tokens(Word, Lyrics) %>%
+  mutate(Word_org = Word)
+```
+
+Write a new version of the data set where the data are pre-processed
+```{r}
+readr::write_csv(
+  songs, 
+  file = PREPROC_PATH
+)
+```
+
+# Preprocessing the Data
+
+In the following, we do some preprocessing of the data that involves the following: 
+  - removing punctuation symbols, 
+  - removing newline characters, - 
+  - removing diacritics from Arabic unicode text.
+
+In addition, we preprocessed all the Arabic text in names, title, lyrics, etc. in order to unify the way some letters are written in order to facilitate the text mining processing coming afterwards. 
+
+We do that in such a way to remove ambiguities in writing some particular Arabic characters in particular word positions. 
+For example, the name "أحمد" can sometimes be written "احمد". So we unified all to be written in the same way for the alph أ letter. 
+These include the following: 
+  - Replacing the letter "ي" at the end of a word by "ى". 
+  - Replacing the letter "أ" at the beginning or middle of a word by the letter "ا". 
+  - Replacing the letter "إ" at the beginning of a word by "ا". 
+  - Replacing "ة" at the end of a word by "ه".
+
+Note that in all of these we relaxed the correctness of proper Arabic writing for the sake of much easier text processing and removing ambiguities, and consistency of inferences. 
+For example, the composer Mohamed ElMogy is sometimes written as "محمد الموجي" and sometimes "محمد الموجى". So, we found it much easier to have one writing using the latter, even though, proper formal Arabic implies the former.
+
+Removing newline characters, punctuation symbols, and diacritics.
+
+In the following, we define a function that would try to remove ambiguities in writing some particular Arabic characters in particular word positions.
+```{r}
+sub_arabic_chars <- function(x) {
+  # We use the unicodes of the characters.
+  
+  # Replace "ي" with "ى".
+  org <- as_utf8("*\u064A$")    # حرف ي at the end of word
+  substit <- as_utf8("\u0649")    # حرف ى
+  x <- sub(org, substit, x)
+  
+  # Replace "أ" with "ا".
+  org <- as_utf8("\u0623")   # حرف أ
+  substit <- as_utf8("\u0627")   # حرف ا
+  x <- sub(org, substit, x)
+
+  #### Replace "إ" with "ا".
+  org <- as_utf8("\u0625")   # حرف  إ
+  substit <- as_utf8("\u0627")    # حرف ا
+  x <- sub(org, substit, x)
+ 
+  # Replace "ة" with "ه".
+  org <- as_utf8("\u0629")  # حرف ة
+  substit <- as_utf8("\u0647")   # حرف ه
+  x <- sub(org, substit, x)
+
+  x
+}
+```
+
+
+Using python CAMeL-tools for preprocessing.
+
+```{r}
+library(reticulate)
+use_condaenv(condaenv = "nlp", required = TRUE)
+```
+
+```{r}
+songs <- read.csv(
+  PREPROC_PATH, 
+  header = TRUE, 
+  sep = ",", 
+  stringsAsFactors = FALSE, 
+  encoding = "UTF-8", 
+  na.strings = "" # Empty fields are replaced by NA.
+)
+```
+
+```{r}
+# Read the stop words list
+stopwords <- read.table(
+  STOP_WORDS_PATH, 
+  header = TRUE
+)
+```
+
+
+```{python}
+import pandas as pd
+import string
+import re
+import gensim
+
+from camel_tools.utils.normalize import normalize_unicode
+from camel_tools.utils.normalize import normalize_alef_maksura_ar
+from camel_tools.utils.normalize import normalize_alef_ar
+from camel_tools.utils.normalize import normalize_teh_marbuta_ar
+from camel_tools.utils.normalize import normalize_teh_marbuta_ar
+from camel_tools.utils.dediac import dediac_ar
+
+py_songs = r.songs
+py_stopwords = r.stopwords
+```
+
+```{python}
+def clean_songs(text_data):
+
+  #remove English text
+  text_data=[re.sub('[a-zA-Z]','',x) for x in text_data]
+
+  text_data=[x.strip() for x in text_data]
+
+  return text_data
+```
+
+```{python}
+def preprocess_using_camel_tools(text_data):
+    
+    # Unicode normalization
+    text_data = [normalize_unicode(x) for x in text_data]
+    
+    # Orthographic normalization
+    
+    ## Normalize various Alef variations to plain Alef character, for example, أ, إ,آ , are all converted to ا.
+    text_data = [normalize_alef_ar(x) for x in text_data]
+    
+    ## Normalize all occurrences of Alef Maksura characters to a Yeh character, for example, إلى becomes إلي.
+    text_data = [normalize_alef_maksura_ar(x) for x in text_data]
+    
+    ## Normalize all occurrences of Teh Marbuta characters to a Heh character, for example, اية becomes ايه.
+    text_data = [normalize_teh_marbuta_ar(x) for x in text_data]
+    
+    # Dediacritization
+    text_data = [dediac_ar(x) for x in text_data]
+    
+    return text_data
+```
+
+```{python}
+def remove_whitespaces(text_data):
+    ''' 
+    Remove unnecessary whitespace characters.
+    '''
+
+    text_data = [x.replace("\t", " ") for x in text_data]
+    text_data = [x.replace("\n", " ") for x in text_data]
+    text_data = [x.strip() for x in text_data]
+    
+    return text_data
+```
+
+```{python}
+def remove_punctuation(text_data):
+    # Remove punctuation
+    exclude = set(string.punctuation)
+
+    for ch in exclude:
+        text_data = [x.replace(ch, " ") for x in text_data]
+        
+    return text_data
+```
+
+```{python}
+def clean_str(text):
+    search_chars = ["أ","إ","آ","ة","_","-","/",".","،"," و "," يا ",'"',"ـ","'","ى","\\",'\n', '\t','&quot;','?','؟','!']
+    replace_chars = ["ا","ا","ا","ه"," "," ","","",""," و"," يا","","","","ي","",' ', ' ',' ',' ? ',' ؟ ',' ! ']
+     
+    # Remove tashkeel   (this can be done automatically and better by CAMeL-Tools)
+    p_tashkeel = re.compile(r"[\u0617-\u061A\u064B-\u0652]")
+    text = re.sub(p_tashkeel, "", text)
+     
+    # remove longation
+    p_longation = re.compile(r"(.)\1+")
+    subst = r"\1\1"
+    text = re.sub(p_longation, subst, text)
+     
+    text = text.replace("وو", "و")
+    text = text.replace("يي", "ي")
+    text = text.replace("اا", "ا")
+     
+    for i in range(len(search_chars)):
+         text = text.replace(search_chars[i], replace_chars[i])
+       
+    # trim
+    text = text.strip()
+    
+    return text
+````
+
+```{python}
+def clean_text(text_data):
+    return [clean_str(text) for text in text_data]
+````
+
+```{python}
+def preprocess_all(text_data):
+    text_data = clean_songs(text_data)
+    text_data = preprocess_using_camel_tools(text_data)
+    text_data = remove_whitespaces(text_data)
+    text_data = remove_punctuation(text_data)
+    text_data = clean_text(text_data)
+
+    return text_data
+```
+
+```{python}
+songs_processed = py_songs.copy()
+```
+
+```{python}
+songs_processed['Composer'] = preprocess_all(py_songs['Composer'].values.tolist())
+songs_processed['Lyricist'] = preprocess_all(py_songs['Lyricist'].values.tolist())
+songs_processed['Song'] = preprocess_all(py_songs['Song'].values.tolist())
+songs_processed['Composer'] = preprocess_all(py_songs['Composer'].values.tolist())
+songs_processed['Lyricist'] = preprocess_all(py_songs['Lyricist'].values.tolist())
+songs_processed['Word'] = preprocess_all(py_songs['Word'].values.tolist())
+songs_processed['Word_org'] = preprocess_all(py_songs['Word_org'].values.tolist())
+```
+
+
+```{python}
+# Remove duplicates
+#songs_processed = songs_processed.drop_duplicates()
+```
+
+
+```{python}
+#songs_processed = pd.DataFrame(py_songs['Year'])
+#songs_processed['Composer'] = preprocess_all(py_songs['Composer'].values.tolist())
+#songs_processed['Lyricist'] = preprocess_all(py_songs['Lyricist'].values.tolist())
+#songs_processed['Song']     = preprocess_all(py_songs['Song'].values.tolist())
+#songs_processed['Decade']   = py_songs['Decade']
+#songs_processed['Composer_first_name'] = preprocess_all(py_songs['Composer_first_name'].values.tolist())
+# songs_processed['Composer_last_name'] = preprocess_all(py_songs['Composer_last_name'].values.tolist())
+# songs_processed['Lyricist_first_name'] = preprocess_all(py_songs['Lyricist_first_name'].values.tolist())
+# songs_processed['Lyricist_last_name'] = preprocess_all(py_songs['Lyricist_last_name'].values.tolist())
+# songs_processed['Word'] = preprocess_all(py_songs['Word'].values.tolist())
+# songs_processed['Word_org'] = preprocess_all(py_songs['Word_org'].values.tolist())
+```
+
+```{python}
+songs_processed.to_csv(
+  r.PREPROC_PATH, 
+  sep=',' , 
+  encoding='utf-8', 
+  index=False
+)
+```
+
+
+```{python}
+stopwords_processed = py_stopwords.copy()
+```
+
+```{python}
+stopwords_processed["stop_words"] = preprocess_all(py_stopwords["stop_words"].values.tolist()) 
+```
+
+```{python}
+stopwords_processed = stopwords_processed.drop_duplicates()
+```
+
+
+```{python}
+stopwords_processed.to_csv(
+  r.PREPROC_SW_PATH, 
+  sep=' ', 
+  index=False
+)
+```
+
+
+# Adding New Columns
+
+```{r}
+songs <- read.csv(
+  PREPROC_PATH, 
+  header = TRUE, 
+  sep = ",", 
+  stringsAsFactors = FALSE, 
+  encoding = "UTF-8", 
+  na.strings = "" # Empty fields are replaced by NA.
+)
+```
+
+Create a decade column: We add a new derived column to the original data which is "Decade". 
+We aggregate each 10 years into a decade, and further partition it into two halves: the early period of the decade, namely the first 5 years, and the latter part of the decade, namely, the last 5 years.
+
+```{r}
+songs <- songs %>% 
+  arrange(Year) %>%
+  mutate(Decade = 
+           ifelse(Year %in% 1945:1949, "Late 1940s",
+           ifelse(Year %in% 1950:1954, "Early 1950s",
+           ifelse(Year %in% 1955:1959, "Late 1950s",
+           ifelse(Year %in% 1960:1964, "Early 1960s",
+           ifelse(Year %in% 1965:1969, "Late 1960s",
+           ifelse(Year %in% 1970:1974, "Early 1970s",
+           ifelse(Year %in% 1975:1979, "Late 1970s",
+           ifelse(Year %in% 1980:1984, "Early 1980s",
+           ifelse(Year %in% 1985:1989, "Late 1980s",NA))))))))))
+```
+
+Create two new columns that divide all names (composers and lyricists) into first names and last names. 
+This is done to ease the preprocessing of the Arabic text later.
+
+```{r}
+concat <- function(x) ifelse(length(x[-1]) != 0, stri_paste_list(list(x[-1]), sep = " "), NA)
+
+songs <- songs %>%
+  mutate(Composer_first_name= ifelse(!is.na(Composer),
+                                     sapply(stri_split(Composer, tokens_only = TRUE, regex = " "), "[", 1), NA)) %>%
+  mutate(Composer_last_name = ifelse(!is.na(Composer),
+                                     sapply(stri_split(Composer, tokens_only = TRUE, regex = " "), FUN = "concat"), NA)) %>%
+  mutate(Lyricist_first_name = ifelse(!is.na(Lyricist),
+                                      sapply(stri_split(Lyricist, tokens_only = TRUE, regex = " "), "[", 1), NA)) %>%
+  mutate(Lyricist_last_name = ifelse(!is.na(Lyricist),
+                                     sapply(stri_split(Lyricist, tokens_only = TRUE, regex = " "), FUN = "concat"), NA))
+```
+
+```{r}
+readr::write_csv(
+  songs, 
+  file = PREPROC_PATH
+)
+```
+
+# Remove Stop Words
+
+Read the songs and stop words after applying CaMeL Tools in Python
+```{r}
+songs <- read.csv(
+  PREPROC_PATH, 
+  header = TRUE, 
+  sep = ",", 
+  stringsAsFactors = FALSE, 
+  encoding = "UTF-8", 
+  na.strings = "" # Empty fields are replaced by NA.
+)
+
+# Read the stop words list
+my_stopwords <- read.table(
+  PREPROC_SW_PATH, 
+  header = TRUE
+)
+
+colnames(my_stopwords) <- c("Word")
+```
+
+Remove stop words after applying "substitute Arabic chars" using the CaMel Tools.
+```{r}
+songs <- songs %>% 
+  anti_join(my_stopwords, by = "Word")
+```
+
+
+```{r}
+# Remove empty word entries.
+# songs <- songs %>%
+#  dplyr::filter(Word != "") %>%
+#  dplyr::filter(!is.na(Word))
+```
+
+Write a new version of the data set where the data are pre-processed
+```{r}
+readr::write_csv(
+  songs, 
+  file = PREPROC_PATH
+)
+```
+
+```{r}
+rm(songs)
+```
+

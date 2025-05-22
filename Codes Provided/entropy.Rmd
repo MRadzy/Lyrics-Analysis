@@ -1,0 +1,536 @@
+---
+title: "Entropy Analysis"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Loading the Required Packages
+
+```{r}
+library(utf8)
+library(tokenizers)
+library(readr)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+setwd("/Volumes/Samsung_T5/wg_imhotep/research_and_innovation/Cyber Physical Systems/Tracks/Natural Language Processing/work_in_progress/analysis_of_Shadia_songs")
+DATA_PATH <- "./data/songs.csv"
+```
+
+# Define the Required Routines
+
+The following function returns a dataframe of all possible Arabic letters and their variations.
+```{r}
+# Arabic letters and space
+construct_df <- function() {
+  df <- data.frame(
+    c("U+0621", "U+0622", "U+0623", "U+0625", "U+0627", "U+0671", "U+0672", "U+0673", "U+0674", "U+0675",   
+    "U+0628", "U+066E", "U+067B", "U+067E", "U+0680", "U+062A", "U+067A", "U+062B", "U+062C", 
+    "U+062D", "U+062E", "U+062F", "U+0630", "U+0631", 
+    "U+0632", "U+0633", "U+0634", "U+0635", "U+0636", 
+    "U+0637", "U+0638", "U+0639", "U+063A", "U+0641", 
+    "U+0642", "U+0643", "U+0644", "U+0645", "U+0646", 
+    "U+0647", "U+06C1", "U+06C3",  
+    "U+0648", "U+0624", "U+0620", "U+0649", "U+064A", "U+06CC", "U+0020"),
+    c(as_utf8("\u0621"), as_utf8("\u0622"), as_utf8("\u0623"), as_utf8("\u0625"), as_utf8("\u0627"), 
+    as_utf8("\u0671"), as_utf8("\u0672"), as_utf8("\u0673"), as_utf8("\u0674"), as_utf8("\u0675"), 
+    as_utf8("\u0628"), as_utf8("\u066E"), as_utf8("\u067B"), as_utf8("\u067E"), as_utf8("\u0680"),
+    as_utf8("\u062A"), as_utf8("\u067A"), as_utf8("\u062B"), as_utf8("\u062C"), as_utf8("\u062D"), 
+    as_utf8("\u062E"), as_utf8("\u062F"), as_utf8("\u0630"), as_utf8("\u0631"), as_utf8("\u0632"), 
+    as_utf8("\u0633"), as_utf8("\u0634"), as_utf8("\u0635"), as_utf8("\u0636"), as_utf8("\u0637"), 
+    as_utf8("\u0638"), as_utf8("\u0639"), as_utf8("\u063A"), as_utf8("\u0641"), as_utf8("\u0642"), 
+    as_utf8("\u0643"), as_utf8("\u0644"), as_utf8("\u0645"), as_utf8("\u0646"), as_utf8("\u0647"), as_utf8("\u06C1"), as_utf8("\u06C3"),
+    as_utf8("\u0648"), as_utf8("\u0624"), as_utf8("\u0620"), as_utf8("\u0649"), as_utf8("\u064A"), as_utf8("\u06CC"),
+    as_utf8("\u0020")), numeric(49)
+  )
+  
+  colnames(df) <- c("unicode", "letter", "frequency")
+  
+  df
+}
+```
+
+The following function computes the frequency of all Arabic letters in a given corpus. The corpus is assumed as a dataframe of texts.
+```{r}
+#  Arabic characters Frequency with input as a corpus of text.
+
+arabic_characters_frequency <- function(corpus_of_text) {
+  # The following function computes the frequency of all Arabic letters in a given corpus. The corpus is assumed as a dataframe of texts.
+  # corpus_of_text: a dataframe of texts.
+  
+  # Construct the dataframe with Arabic letters, their unicodes, and initialized frequencies to zero.
+  arabic.letters.space.frequency <- construct_df()
+  
+  #browser()
+  
+  for (i in 1:nrow(arabic.letters.space.frequency)) {
+    for (j in 1:nrow(corpus_of_text)) {
+      list_of_characters <- tokenize_characters(corpus_of_text[j,], strip_non_alphanum = FALSE)[[1]]
+      for (k in 1:length(list_of_characters))
+        if(arabic.letters.space.frequency[i, "letter"] == list_of_characters[k]){
+          arabic.letters.space.frequency[i, 'frequency'] <- arabic.letters.space.frequency[i, 'frequency'] + 1
+      }
+    }
+  }
+  arabic.letters.space.frequency
+}
+```
+
+
+Testing the defined functions.
+```{r}
+corpus.of.text <- data.frame(c('على احمد محمد', 'محمد عبد العزيز خميس', 'وليد السيد على'))
+colnames(corpus.of.text) <- "corpus"
+corpus.of.text
+```
+
+```{r}
+freqs <- arabic_characters_frequency(corpus.of.text)
+freqs
+```
+
+```{r}
+cat("The corpus contains a total of:", sum(freqs$frequency), " letters.", "\n")
+```
+
+# Setting up Our Lyrics Corpus
+
+Reading the csv file containing Shadia's songs information in the form of comma separated (csv) file.
+```{r}
+songs <- read.csv(
+  DATA_PATH, 
+  header = TRUE, 
+  sep = ",", 
+  stringsAsFactors = FALSE, 
+  encoding = "UTF-8", 
+  na.strings = "" # Empty fields are replace by NA.
+)
+
+no_of_songs <- nrow(songs)
+no_of_attributes <- ncol(songs)
+attrs <- names(songs)
+```
+
+Extract only songs with their lyrics.
+```{r}
+lyrics <- data.frame(songs$Song, songs$Lyrics)
+colnames(lyrics) <- c("Song", "Lyrics")
+#colnames(lyrics) <- c("corpus")
+lyrics <- na.omit(lyrics)
+```
+
+```{r}
+cat("Total number of songs: ", nrow(lyrics), "\n")
+```
+
+```{r}
+corpus <- data.frame(lyrics$Lyrics)
+colnames(corpus) <- c("corpus")
+freqs <- arabic_characters_frequency(corpus)
+```
+
+
+```{r}
+readr::write_csv(
+  freqs, 
+  file = "./data/freqs.csv"
+)
+```
+
+
+# Calculating Entropy
+
+## Defining the necessary functions
+
+The following function takes a probability distribution over finite space and computes its entropy.
+```{r}
+entropy <- function(prob_dist){
+  # Calculate the entropy given the probability distributions in prob_dist.
+  # prob_dist: vector of numerical entries that represent the probability distribution for which we get the entropy.
+  # It is assumed that all are non-zero probabilities.
+  
+  # Enough tolerance to remove zero (almost zero) probabilities in order to have stable caculations.
+  epsilon = 1.e-6
+  
+  # Remove almost zero probabilities for stable computation of the entropy.
+  prob_dist <- unlist(lapply(prob_dist, function(x) if(x > epsilon) x))
+    
+  # Compute and return the entropy.
+  A <- unlist(lapply(prob_dist, function(x) -x * log2(x)))
+  sum(A)   
+}
+```
+
+
+Define the function which computes the empirical probability mass function of the given sample data.
+```{r}
+extract_prob_dist <- function(frequency) {
+  # Convert the count into normalized probability distribution. 
+  # So, this function computes the empirical probability mass function of the given data.
+  # frequency: a vector of non-negative integers representing counts.
+  
+  # Computing the total sample size.
+  M = sum(frequency)
+  
+  # Normalize to get proper probability distribution.
+  prob <- frequency / M
+  
+  prob
+}
+```
+
+## Normalize
+
+Coerce normalization of different forms of some Arabic letters into one unified form, or equivalently count all forms as one. For example, "ا", "أ", "إ", all different forms of the same letter alph.
+```{r}
+normalize_arabic_letters <- function(freqs) {
+  # Normalize some Arabic letters to be the same.
+  # freqs: dataframe containing a column called "frequency" that contains the counts.
+  
+  letter_normalized_freqs <- numeric()
+  letter_normalized_freqs[1] <- sum(freqs[1:8,]$frequency) # the letter alph 
+  letter_normalized_freqs[2:3] <- freqs[9:10,]$frequency
+  letter_normalized_freqs[4] <- sum(freqs[11:15,]$frequency) # the letter baa 
+  letter_normalized_freqs[5] <- sum(freqs[16:17,]$frequency) # the letter taa 
+  letter_normalized_freqs[6:27] <- freqs[18:39,]$frequency
+  letter_normalized_freqs[28] <- sum(freqs[40:42,]$frequency) # the letter haa
+  letter_normalized_freqs[29] <- sum(freqs[43:44,]$frequency) # the letter wawo
+  letter_normalized_freqs[30] <- sum(freqs[45:48,]$frequency) # the letter yae
+  letter_normalized_freqs[31] <- freqs[49,]$frequency
+  
+  letter_normalized_freqs
+}
+```
+
+## Compute the entropy of the whole corpus
+
+Now we compute the entropy of the whole corpus of lyrics.
+```{r}
+letter_normalized_freqs <- normalize_arabic_letters(freqs)
+prob_dist <- extract_prob_dist(letter_normalized_freqs)
+corpus_entropy <- entropy(prob_dist)
+cat("The entropy of the whole corpus is: ", corpus_entropy, "\n")
+```
+
+## Computing the entropy for every song
+
+In the following we compute the entropy for every song in the corpus.
+
+```{r}
+N <- nrow(lyrics) # get the total number of songs.
+song_entropy <- numeric()
+for(i in 1:N) {
+  ly <- data.frame(lyrics$Lyrics[i]) # get lyrics of current song
+  colnames(ly) <- c("corpus") 
+  freqs <- arabic_characters_frequency(ly)  # compute the histogram/frequency of all Arabic letters with all variations
+  letter_normalized_freqs <- normalize_arabic_letters(freqs)  # normalize Arabic letters 
+  prob_dist <- extract_prob_dist(letter_normalized_freqs)  # convert the histogram into proper empirical probability mass function
+  song_entropy[i] <- entropy(prob_dist)
+}
+```
+
+```{r}
+lyrics$entropy <- song_entropy
+```
+
+```{r}
+cat("The song with minimum entropy: ", lyrics[which(lyrics$entropy == min(song_entropy)), ]$Song)
+cat("; it has a minimum entropy of: ", min(song_entropy), "\n")
+cat("The song with maximum entropy: ", lyrics[which(lyrics$entropy == max(song_entropy)), ]$Song)
+cat("; it has a maximum entropy of: ", max(song_entropy))
+```
+
+
+The following shows a histogram of the distribution of entropy values across the whole the songs of the corpus.
+```{r}
+song_entropy.plot <- lyrics %>%
+  ggplot(aes(x = entropy)) + 
+  geom_histogram(
+    fill = "lightblue",
+    color = "black",
+    #stat = "identity",
+    bindwidth = 0.1
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45),
+    text = element_text(size = 10)
+  ) +
+  scale_x_continuous(breaks = seq(round(min(lyrics$entropy), 1), round(max(lyrics$entropy,1)) + 1, 0.1)) + 
+  ggtitle("Historgram of entropy values of individual songs") +
+  xlab("Entropy") 
+```
+
+```{r}
+song_entropy.plot
+```
+As shown the songs entrpoy generally follow a Gaussian distribution centered around $3.9$. There is an anomalous song with entropy $2.951778$, which is the song "يا لولى". This song has length $206$. We may investigate why this song has such low entropy.
+This may be due to the fact that it is short. Also, it may have low lexical diversity and/or lexical density.
+
+```{r}
+nchar(lyrics[which(lyrics$Song == "يا لولى"),]$Lyrics)
+```
+
+
+```{r}
+songs <- merge(
+  songs,
+  lyrics,
+  by = "Song"
+)
+```
+
+```{r}
+songs <- songs[,-5]
+```
+
+```{r}
+colnames(songs)[5] <- "Lyrics"
+```
+
+```{r}
+readr::write_csv(
+  songs, 
+  file = "./data/songs_with_entropy.csv"
+)
+```
+
+## Compute entropy per year
+
+In this section we compute the overall entropy of all songs performed in each given year. So, given a particular year, the corpus over which the entropy is computed is all the lyrics performed during that year.
+The corpus over which the entropy is computed is the set of lyrics performed in a given year.
+
+We read the songs corpus.
+```{r}
+# Reading the songs corpus.
+songs <- read.csv(
+  DATA_PATH, 
+  header = TRUE, 
+  sep = ",", 
+  stringsAsFactors = FALSE, 
+  encoding = "UTF-8", 
+  na.strings = "" # Empty fields are replace by NA.
+)
+
+no_of_songs <- nrow(songs)
+no_of_attributes <- ncol(songs)
+attrs <- names(songs)
+```
+
+Extract only songs with available lyrics.
+```{r}
+lyrics <- data.frame(songs$Year, songs$Song, songs$Lyrics)
+colnames(lyrics) <- c("Year", "Song", "Lyrics")
+#colnames(lyrics) <- c("corpus")
+lyrics <- na.omit(lyrics)
+```
+
+```{r}
+compute_entropy <- function(df) {
+  #browser()
+  lys <- data.frame(df$Lyrics)
+  lys <- na.omit(lys)
+  #print(df$Year)
+  freqs <- arabic_characters_frequency(lys)
+  letter_normalized_freqs <- normalize_arabic_letters(freqs)
+
+  prob_dist <- extract_prob_dist(letter_normalized_freqs)
+
+  entropy(prob_dist)
+}
+```
+
+```{r}
+ents <- songs %>%
+  group_by(Year) %>%
+  do(data.frame(val = compute_entropy(.)))
+```
+
+```{r}
+ents <- na.omit(ents)
+ents
+```
+
+Plot the entropies over the years.
+
+```{r}
+yearly_entropy.plot <- ents %>%
+  ggplot(aes(x = Year, y = val)) +
+  geom_point(
+    alpha = 0.4,
+    color = "darkblue",
+    size = 2,
+    position = "jitter"
+  ) +
+  stat_smooth(
+    color = "black",
+    se = TRUE,  # display confidence interval around smooth
+    method = "lm"  # smoothing method
+  ) +
+  geom_smooth(
+    aes(x = Year, y = val),
+    se = TRUE,
+    color = "red",
+    lwd = 1
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45),
+    text = element_text(size = 10)
+  ) +
+  ggtitle("Yearly Entropy") +
+  scale_x_continuous(breaks = seq(min(ents$Year), max(ents$Year), 1)) +
+  scale_y_continuous(breaks = seq(0, max(ents$val), 0.01)) 
+```
+
+
+```{r}
+yearly_entropy.plot
+```
+
+From the figure it seems that there is a general decreasing trend in the entropy over the years of Shadia's singing performance.
+The more accurate smoothing curve which is generated using the loess method (Local Polynomial Regression Fitting). The loess curve indicates a maximum entropy point around late 1950s and a minimum entropy point about early 1970s. As entropy can be taken as information 
+measure, we may conclude that the semantic content of Shadia's lyrics has a general decreasing trend, with a peak point in the late 1950's and trough point in the early 1970s.
+
+## Compute entropy per decade
+
+In this section we compute the overall entropy of all songs performed in each given decade. So, given a particular decade, the corpus over which the entropy is computed is all the lyrics performed during that decade.
+The corpus over which the entropy is computed is the set of lyrics performed in a given decade.
+
+We read the songs corpus.
+```{r}
+# Reading the songs corpus.
+songs <- read.csv(
+  DATA_PATH, 
+  header = TRUE, 
+  sep = ",", 
+  stringsAsFactors = FALSE, 
+  encoding = "UTF-8", 
+  na.strings = "" # Empty fields are replace by NA.
+)
+
+no_of_songs <- nrow(songs)
+no_of_attributes <- ncol(songs)
+attrs <- names(songs)
+```
+
+```{r}
+songs <- songs %>% 
+  arrange(Year) %>%
+  mutate(Decade = 
+           ifelse(Year %in% 1945:1949, "Late 1940s",
+           ifelse(Year %in% 1950:1954, "Early 1950s",
+           ifelse(Year %in% 1955:1959, "Late 1950s",
+           ifelse(Year %in% 1960:1964, "Early 1960s",
+           ifelse(Year %in% 1965:1969, "Late 1960s",
+           ifelse(Year %in% 1970:1974, "Early 1970s",
+           ifelse(Year %in% 1975:1979, "Late 1970s",
+           ifelse(Year %in% 1980:1984, "Early 1980s",
+           ifelse(Year %in% 1985:1989, "Late 1980s",NA))))))))))
+```
+
+
+Extract only songs with available lyrics.
+```{r}
+lyrics <- data.frame(songs$Decade, songs$Song, songs$Lyrics)
+colnames(lyrics) <- c("Decade", "Song", "Lyrics")
+#colnames(lyrics) <- c("corpus")
+lyrics <- lyrics %>%
+  na.omit() %>%
+  group_by(Decade)
+```
+
+```{r}
+lyrics <- lyrics %>%
+  mutate(years = as.numeric(parse_number(Decade))) %>%
+  mutate(part = ifelse(grepl("Early", Decade), 0, 1))
+```
+
+```{r}
+ lyrics <- lyrics %>%
+  arrange(years, part) #%>%
+  #mutate(.r = row_number())
+```
+
+```{r}
+lyrics <- within(
+  lyrics, 
+  Decade <- factor(Decade, levels = c("Late 1940s" , "Early 1950s", "Late 1950s", "Early 1960s", "Late 1960s", "Early 1970s", "Late 1970s", "Early 1980s", "Late 1980s"))
+)
+```
+
+```{r}
+compute_entropy <- function(df) {
+  #browser()
+  lys <- data.frame(df$Lyrics)
+  lys <- na.omit(lys)
+  #print(df$Year)
+  freqs <- arabic_characters_frequency(lys)
+  letter_normalized_freqs <- normalize_arabic_letters(freqs)
+
+  prob_dist <- extract_prob_dist(letter_normalized_freqs)
+
+  entropy(prob_dist)
+}
+```
+
+```{r}
+ents <- lyrics %>%
+  group_by(Decade) %>%
+  do(data.frame(val = compute_entropy(.)))
+```
+
+```{r}
+ents
+```
+```{r}
+corpus_entropy
+```
+
+
+```{r}
+ents_decade.plot <- ents %>%
+  ggplot(aes(x = Decade, y = val)) + 
+  geom_bar(
+    fill = "darkblue",
+    stat = "identity",
+    size = 0.1
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45),
+    text = element_text(size = 10)
+  ) +
+   geom_hline(
+    yintercept = corpus_entropy, 
+    color = "red", 
+    linetype = "dashed"
+  ) +
+  ggtitle("Entropy/Decade") +
+  # xlab("Decade") + 
+  # ylab("Number of songs") #+
+  # # scale_x_continuous(breaks = seq(min(songs.freq$Year), max(songs.freq$Year), 1)) +
+  scale_y_continuous(breaks = seq(0, 4.5, 0.2)) 
+  # scale_y_continuous(
+  #   breaks = function(x) unique(floor(pretty(seq(0, (max(x) + 1) * 1.1))))
+  # )
+
+```
+
+```{r}
+ents_decade.plot
+```
+
+As seen in the figure, in all decades the entropy is almost the same for the lyrics performed in the decade. Late 1980s has a bit of a decrease, but this can be attributed to statistical insufficiency of the lyrics performed during that period to have a good estimate of the entropy as this was the end of Shadia's career (review above the number of songs and the total size of the lyrics during this period). The horizontal dashed red line represents the entropy computed over the whole corpus of lyrics. This should then be more accurate, as it computes over a larger text, and represents a baseline. It is noticed that almost all decades are very close to this baseline.
+
+
+

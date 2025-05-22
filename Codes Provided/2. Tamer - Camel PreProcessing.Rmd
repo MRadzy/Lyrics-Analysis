@@ -1,0 +1,311 @@
+---
+title: 'Lyrics analysis: شادية'
+author: "Walid Gomaa, Mohamed A. Khamis"
+date: "17/09/2022"
+output:
+  html_document: default
+  pdf_document: 
+    latex_engine: lualatex
+editor_options: 
+  markdown: 
+    wrap: 72
+bibliography: references.bib    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Including required libraries.
+
+```{r}
+#library(arabicStemR)
+```
+
+
+```{r}
+setwd("D://2017-2023 Ejada & Ejust//Machine Learning in Natural Language Processing//Analysis of Shadia - Journal")
+```
+
+```{r}
+songs <- read.csv("./data/songs_proc.csv", header = TRUE, sep = ",", 
+                  stringsAsFactors = FALSE, encoding = "UTF-8", na.strings = "") # Empty fields are replaced by NA.
+```
+
+
+```{r}
+# Read the stop words list
+stopwords <- read.table("./data/stopwords.txt", header = TRUE)
+```
+
+
+## Preprocessing the data
+
+In the following, we do some preprocessing of the data that involves the following: - removing punctuation symbols, - removing newline characters, - removing diacritics from Arabic unicode text.
+
+All of the above are done using the arabicStemR package.
+
+In addition, we preprocessed all the Arabic text in names, title, lyrics, etc. in order to unify the way some letters are written in order to facilitate the text mining processing coming afterwards. 
+
+We do that in such a way to remove ambiguities in writing some particular Arabic characters in particular word positions. 
+For example, the name "أحمد" can sometimes be written "احمد". 
+So we unified all to be written in the same way for the alph letter. 
+These include the following: 
+- Replacing the letter "ي" at the end of a word by "ى". 
+- Replacing the letter "أ" at the beginning or middle of a word by the letter "ا". 
+- Replacing the letter "إ" at the beginning of a word by "ا". 
+- Replacing "ة" at the end of a word by "ه".
+
+Note that in all of these we relaxed the correctness of proper Arabic writing for the sake of much easier text processing and removing ambiguities, and consistency of inferring. 
+For example, the composer Mohamed ElMogy is sometimes written as "محمد الموجي" and sometimes "محمد الموجى". So, we found it much easier to have one writing using the latter, even though, proper formal Arabic implies the former.
+
+Removing newline characters, punctuation symbols, and diacritics.
+
+```{r}
+#invisible(sapply(1:no_of_songs, FUN = function(i)
+#  invisible(sapply(1:no_of_attributes, FUN = function(j)
+#    {
+#     songs[i,j] <<- removePunctuation(songs[i,j])
+      #songs[i,j] <<- removeNumbers(songs[i,j])
+      #songs[i,j] <<- removeArabicNumbers(songs[i,j])
+#     songs[i,j] <<- removeNewlineChars(songs[i,j])
+#     songs[i,j] <<- removeDiacritics(songs[i,j])
+#   }))))
+
+
+#invisible(sapply(1:no_stopwords, FUN = function(i)
+#  {
+#    my_stopwords$Word[i] <<- removePunctuation(my_stopwords$Word[i])
+#    my_stopwords$Word[i] <<- removeNewlineChars(my_stopwords$Word[i])
+#    my_stopwords$Word[i] <<- removeDiacritics(my_stopwords$Word[i])
+#  }))
+```
+
+In the following, we define a function that would try to remove ambiguities in writing some particular Arabic characters in particular word positions.
+
+```{r}
+sub_arabic_chars <- function(x)
+{
+  # We use the unicodes of the characters.
+  
+  # Replace "ي" with "ى".
+  org <- as_utf8("*\u064A$")    # حرف ي at the end of word
+  substit <- as_utf8("\u0649")    # حرف ى
+  x <- sub(org, substit, x)
+  
+  # Replace "أ" with "ا".
+  org <- as_utf8("\u0623")   # حرف أ
+  substit <- as_utf8("\u0627")   # حرف ا
+  x <- sub(org, substit, x)
+
+  #### Replace "إ" with "ا".
+  org <- as_utf8("\u0625")   # حرف  إ
+  substit <- as_utf8("\u0627")    # حرف ا
+  x <- sub(org, substit, x)
+ 
+  # Replace "ة" with "ه".
+  org <- as_utf8("\u0629")  # حرف ة
+  substit <- as_utf8("\u0647")   # حرف ه
+  x <- sub(org, substit, x)
+
+  x
+}
+```
+
+
+Process all Arabic words in the dataset (currently only the composers and lyricists names) so that common ambiguities in the different ways people write Arabic characters are mitigated.
+
+```{r}
+handle_last_name_yae <- function(x)
+  stri_paste_list(list(sapply(unlist(stri_split(x, tokens_only = TRUE, regex = " ")),
+                              FUN = "sub_arabic_chars")), sep = " ")
+
+#songs$Composer_first_name <- 
+#  sapply(songs$Composer_first_name, FUN = "sub_arabic_chars")
+#songs$Composer_last_name <- 
+#  sapply(songs$Composer_last_name, FUN = "handle_last_name_yae")
+
+#songs$Lyricist_first_name <- 
+#  sapply(songs$Lyricist_first_name, FUN = "sub_arabic_chars")
+#songs$Lyricist_last_name <- 
+#  sapply(songs$Lyricist_last_name, FUN = "handle_last_name_yae")
+```
+
+
+```{r}
+# songs$Word <- sapply(songs$Word, FUN = "sub_arabic_chars")
+```
+
+```{r}
+# my_stopwords$Word <- sapply(my_stopwords$Word, FUN = "sub_arabic_chars")
+```
+
+# Using python and particularly the CAMeL-tools
+
+```{r}
+library(reticulate)
+use_condaenv(conda_list()$name, required = TRUE)
+```
+
+```{r}
+songs <- read.csv("./data/songs_proc.csv", header = TRUE, sep = ",", 
+                  stringsAsFactors = FALSE, encoding = "UTF-8", na.strings = "") # Empty fields are replaced by NA.
+```
+
+
+```{r}
+# Read the stop words list
+stopwords <- read.table("./data/stopwords.txt", header = TRUE)
+```
+
+
+```{python}
+import pandas as pd
+import string
+import re
+import gensim
+
+from camel_tools.utils.normalize import normalize_unicode
+from camel_tools.utils.normalize import normalize_alef_maksura_ar
+from camel_tools.utils.normalize import normalize_alef_ar
+from camel_tools.utils.normalize import normalize_teh_marbuta_ar
+from camel_tools.utils.normalize import normalize_teh_marbuta_ar
+from camel_tools.utils.dediac import dediac_ar
+
+py_songs = r.songs
+py_stopwords = r.stopwords
+```
+
+```{python}
+def clean_songs(text_data):
+
+  #remove English text
+  text_data=[re.sub('[a-zA-Z]','',x) for x in text_data]
+
+  text_data=[x.strip() for x in text_data]
+
+  return text_data
+```
+
+```{python}
+def preprocess_using_camel_tools(text_data):
+    
+    # Unicode normalization
+    text_data = [normalize_unicode(x) for x in text_data]
+    
+    # Orthographic normalization
+    
+    ## Normalize various Alef variations to plain Alef character, for example, أ, إ,آ , are all converted to ا.
+    text_data = [normalize_alef_ar(x) for x in text_data]
+    
+    ## Normalize all occurrences of Alef Maksura characters to a Yeh character, for example, إلى becomes إلي.
+    text_data = [normalize_alef_maksura_ar(x) for x in text_data]
+    
+    ## Normalize all occurrences of Teh Marbuta characters to a Heh character, for example, اية becomes ايه.
+    text_data = [normalize_teh_marbuta_ar(x) for x in text_data]
+    
+    # Dediacritization
+    text_data = [dediac_ar(x) for x in text_data]
+    
+    return text_data
+```
+
+```{python}
+def remove_whitespaces(text_data):
+    ''' 
+    Remove unnecessary whitespace characters.
+    '''
+
+    text_data = [x.replace("\t", " ") for x in text_data]
+    text_data = [x.replace("\n", " ") for x in text_data]
+    text_data = [x.strip() for x in text_data]
+    
+    return text_data
+```
+
+```{python}
+def remove_punctuation(text_data):
+    # Remove punctuation
+    exclude = set(string.punctuation)
+
+    for ch in exclude:
+        text_data = [x.replace(ch, " ") for x in text_data]
+        
+    return text_data
+```
+
+
+```{python}
+def clean_str(text):
+    search_chars = ["أ","إ","آ","ة","_","-","/",".","،"," و "," يا ",'"',"ـ","'","ى","\\",'\n', '\t','&quot;','?','؟','!']
+    replace_chars = ["ا","ا","ا","ه"," "," ","","",""," و"," يا","","","","ي","",' ', ' ',' ',' ? ',' ؟ ',' ! ']
+    
+    # Remove tashkeel   (this can be done automatically and better by CAMeL-Tools)
+    p_tashkeel = re.compile(r"[\u0617-\u061A\u064B-\u0652]")
+    text = re.sub(p_tashkeel, "", text)
+    
+    # remove longation
+    p_longation = re.compile(r"(.)\1+")
+    subst = r"\1\1"
+    text = re.sub(p_longation, subst, text)
+    
+    text = text.replace("وو", "و")
+    text = text.replace("يي", "ي")
+    text = text.replace("اا", "ا")
+    
+    for i in range(len(search_chars)):
+        text = text.replace(search_chars[i], replace_chars[i])
+        
+    # trim
+    text = text.strip()
+    
+    return text
+````
+
+```{python}
+def clean_text(text_data):
+    return [clean_str(text) for text in text_data]
+````
+
+**************************
+**************************
+**************************
+
+```{python}
+def preprocess_all(text_data):
+
+    text_data = clean_songs(text_data)
+    text_data = preprocess_using_camel_tools(text_data)
+    text_data = remove_whitespaces(text_data)
+    text_data = remove_punctuation(text_data)
+    text_data = clean_text(text_data)
+
+    return text_data
+```
+
+```{python}
+songs_processed = pd.DataFrame(py_songs['Year'])
+songs_processed['Composer'] = preprocess_all(py_songs['Composer'].values.tolist())
+songs_processed['Lyricist'] = preprocess_all(py_songs['Lyricist'].values.tolist())
+songs_processed['Song']     = preprocess_all(py_songs['Song'].values.tolist())
+songs_processed['Decade']   = py_songs['Decade']
+songs_processed['Composer_first_name'] = preprocess_all(py_songs['Composer_first_name'].values.tolist())
+songs_processed['Composer_last_name'] = preprocess_all(py_songs['Composer_last_name'].values.tolist())
+songs_processed['Lyricist_first_name'] = preprocess_all(py_songs['Lyricist_first_name'].values.tolist())
+songs_processed['Lyricist_last_name'] = preprocess_all(py_songs['Lyricist_last_name'].values.tolist())
+songs_processed['Word'] = preprocess_all(py_songs['Word'].values.tolist())
+songs_processed['Word_org'] = preprocess_all(py_songs['Word_org'].values.tolist())
+```
+
+```{python}
+songs_processed.to_csv("./data/songs_proc.csv", sep=',' , encoding='utf-8', index=False)
+```
+
+```{python}
+stopwords_processed = preprocess_all(py_stopwords)
+py_stopwords.to_csv("./data/ar_stop_complete_list_processed.txt", sep=' ', index=False)
+````
+
+```{r}
+knitr::knit_exit()
+```

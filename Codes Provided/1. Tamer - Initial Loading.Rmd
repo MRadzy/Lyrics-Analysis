@@ -1,0 +1,145 @@
+---
+title: 'Lyrics analysis: شادية'
+author: "Walid Gomaa, Mohamed A. Khamis"
+date: "17/09/2022"
+output:
+  html_document: default
+  pdf_document: 
+    latex_engine: lualatex
+editor_options: 
+  markdown: 
+    wrap: 72
+bibliography: references.bib    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+We try to investigate in depth the lyrics of one of the most famous and influential singer in Egypt, namely, شادية. We use statistical, visual, data mining, and exploratory data analysis tools in order to shed light into the artist's career.
+
+Musical lyrics may represent an artist's perspective, as well as the corresponding composer's and lyricist's perspectives. Lyric analysis is no easy task. Because **it is often structured so differently than prose**, it requires caution with assumptions and careful choice of analytic techniques.
+
+Musical lyrics permeate our lives and influence our thoughts, feelings, and perspectives in very subtle ways. The concept of **Predictive Lyrics** is beginning to take its position in research papers and graduate theses. This case study will just touch on a few pieces of this emerging subject.
+
+Fatma Ahmed Kamal Shaker (فاطمة أحمد كمال شاكر), commonly known as Shadia (شادية) is one of the most popular and influential artists in Egypt and the Arab region. She is considered to be one of the greatest Egyptian singers along with Umm Kulthum (ام كلثوم), Mohamed Abdel Wahab (محمد عبد الوهاب), Mohamed Fawzi (محمد فوزي), and Abd ElHalim Hafez (عبد الحليم حافظ). Shadia was born in 1931 and died in 2017. 
+Six of her movies are listed in the top 100 Egyptian movies of the 20th century. In April 2015, she became the first actress to be awarded an honorary doctorate by the Egyptian Academy of Arts (citation: @shadiawiki).
+
+The work of Shadia is very diverse including wide range of genres from romanticism, nationalism, spiritual religion, etc. In order to celebrate this inspiring and diverse body of work, we will explore the sometimes obvious, but often hidden, messages in her lyrics. Lyric analysis is slowly finding its way into the data science and machine learning communities as the possibility of predicting "Hit Songs" approaches reality.
+
+# Data Collection
+
+1)  The names of all songs are collected using Wikipedia page
+    [https://arz.wikipedia.org/wiki/ليستة_اغانى_شادية](https://arz.wikipedia.org/wiki/ليستة_اغانى_شاديه){.uri}
+
+2)  The lyrics of the corresponding songs were collected using several web sites including:
+-   <https://fnanen.net/klmat/alaghany/sh/shadyt.html> which contains comprehensive sets of lyrics for Arabic artists.
+-   <https://ankawa.com/forum/index.php> which also contains the lyrics of many Arabic songs.
+
+3)  Then, we have listened to all the songs on YouTube to rewrite its lyrics because in the past, they used to write only the words as they are repeated only once neglecting the many repeating as the songs are too long to write.
+
+## Including required libraries.
+
+```{r}
+library(tidytext)
+library(dplyr)
+library(stringi)
+library(tidyr)
+```
+
+## Reading the data
+
+```{r}
+setwd("D://2017-2023 Ejada & Ejust//Machine Learning in Natural Language Processing//Analysis of Shadia - Journal")
+```
+
+Reading the csv file containing Shadia songs information in the form of comma separated (csv) file. Read the stop words as well
+
+```{r}
+songs <- read.csv("./data/songs.csv", header = TRUE, sep = ",", 
+                  stringsAsFactors = FALSE, encoding = "UTF-8", na.strings = "") # Empty fields are replace by NA.
+ 
+no_of_songs <- nrow(songs)
+no_of_attributes <- ncol(songs)
+attrs <- names(songs)
+
+
+my_stopwords <- read.table("./data/stopwords.txt", header = TRUE)
+colnames(my_stopwords) <- c("Word")
+no_stopwords <- nrow(my_stopwords)
+```
+
+Create a decade column: We add a new derived column to the original data which is "Decade". 
+We aggregate each 10 years into a decade, and further partition it into two halves: the early period of the decade, namely the first 5 years, and the latter part of the decade, namely, the last 5 years.
+
+```{r}
+songs <- songs %>% 
+  arrange(Year) %>%
+  mutate(Decade = 
+           ifelse(Year %in% 1945:1949, "Late 1940s",
+           ifelse(Year %in% 1950:1954, "Early 1950s",
+           ifelse(Year %in% 1955:1959, "Late 1950s",
+           ifelse(Year %in% 1960:1964, "Early 1960s",
+           ifelse(Year %in% 1965:1969, "Late 1960s",
+           ifelse(Year %in% 1970:1974, "Early 1970s",
+           ifelse(Year %in% 1975:1979, "Late 1970s",
+           ifelse(Year %in% 1980:1984, "Early 1980s",
+           ifelse(Year %in% 1985:1989, "Late 1980s",NA))))))))))
+```
+
+
+Create two new columns that divide all names (composers and lyricists) into first names and last names. 
+This is done to ease the preprocessing of the Arabic text later.
+
+```{r}
+concat <- function(x) ifelse(length(x[-1]) != 0, stri_paste_list(list(x[-1]), sep = " "), NA)
+
+songs <- songs %>%
+  mutate(Composer_first_name= ifelse(!is.na(Composer),
+                                     sapply(stri_split(Composer, tokens_only = TRUE, regex = " "), "[", 1), NA)) %>%
+  mutate(Composer_last_name = ifelse(!is.na(Composer),
+                                     sapply(stri_split(Composer, tokens_only = TRUE, regex = " "), FUN = "concat"), NA)) %>%
+  mutate(Lyricist_first_name = ifelse(!is.na(Lyricist),
+                                      sapply(stri_split(Lyricist, tokens_only = TRUE, regex = " "), "[", 1), NA)) %>%
+  mutate(Lyricist_last_name = ifelse(!is.na(Lyricist),
+                                     sapply(stri_split(Lyricist, tokens_only = TRUE, regex = " "), FUN = "concat"), NA))
+```
+
+
+## Tokenization
+
+Generally, there are different methods and data formats that can be used to **mine** text. 
+Here we use "Tidy Text": a table with one token per row. A token in our context will be a word (or an 1-gram).
+**Tokenization** is therefore the process of splitting the lyrics into tokens. Here we use the R package tidytext's unnest_tokens() to do this.
+
+Processing and mining of natural language text aims at finding the significant words in the given documents. Our first guess might be that the words appearing most frequently in a document are the most significant. 
+However, that intuition is exactly opposite of the truth (you may think of it in terms of information-theoretic principles, that less frequent events carry more information when they occur). 
+The most frequent words include words such as "the" or "and" which help build ideas but do not carry any significance themselves [citation: @rajaraman_mining_2012].
+
+Such words are called **stop words** and have to be filtered out before processing and/or mining the text. 
+So given any language, stop words usually refers to the most common words in a language, however, there is no single universal list of stop words that can be agreed upon by all researchers and practitioners. 
+In our context, we remove stop words from the songs lyrics using the "removeStopWords" function in the R package "arabicStemR". 
+This package contains an Arabic stop word list containing 258 words and include words such as (لا/no), (لأنه/because), (لو/if).
+This list of stop words has two constraints: (1) its size is limited and (2) it is done for modern standard Arabic, hence, it lacks a lot of words in the Egyptian dialect. However, as we will see below in the analysis and results, the error or noise resulting from these two constraints are minimal and does not affect the quality of the results.
+
+Extract tokens
+
+```{r}
+songs <- songs %>%
+  unnest_tokens(Word, Lyrics) %>%
+  mutate(Word_org = Word)
+```
+
+
+Write a new version of the data set where the data are pre-processed
+
+```{r}
+readr::write_csv(songs, file = "./data/songs_proc.csv")
+```
+
+
+```{r}
+knitr::knit_exit()
+```

@@ -1,0 +1,2609 @@
+---
+title: "Analysis of Singer Shadia's Lyrics"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r}
+# pdf_document: default
+#   html_document:
+#     df_print: paged
+```
+
+
+```{r}
+library(tidytext)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+library(wordcloud2)
+library(readr)
+library(scales)
+library(plotly)
+library(data.table)
+library(utf8)
+library(RColorBrewer)
+library(reshape2) 
+library(knitr) # for dynamic reporting
+library(kableExtra) # create a nicely formatted HTML table
+library(formattable) # for the color_tile function
+library(purrr)
+library(fGarch)
+library(fitdistrplus)
+library(patchwork)
+library(cowplot)
+library(ggwordcloud)
+```
+
+
+```{r}
+setwd("/Volumes/Samsung_T5/wg_imhotep/research_and_innovation/Cyber Physical Systems/Tracks/Natural Language Processing/work_in_progress/analysis_of_Shadia_songs")
+PREPROC_PATH <- "./data/songs_proc.csv"
+PREPROC_SW_PATH <- "./data/ar_stop_complete_list_processed.txt"
+```
+
+# Analysis
+
+```{r}
+songs <- read.csv(
+  PREPROC_PATH,
+  header = TRUE,
+  sep = ",", 
+  stringsAsFactors = FALSE, 
+  encoding = "UTF-8", 
+  na.strings = "" # Empty fields are replaced by NA.
+)
+```
+
+## Some High Level Statistical Aggregates of the Data
+
+Print out some preliminary information about the songs data file.
+```{r}
+cat("Total number of songs in the dataset: ", length(unique(songs$Song)), "\n")
+cat("Total number of composers: ", length(unique(songs$Composer)), "\n")
+cat("Total number of lyricists: ", length(unique(songs$Lyricist)), "\n")
+cat("Total number of words in all lyrics (after removing stopwords: ", length((songs$Word)), "\n")
+cat("Total number of unique words in all lyrics (after removing stopwords: ", length(unique((songs$Word))), "\n")
+```
+
+It is apparent from the numbers above that the list of composers whom Shadia dealt with is almost 2/3 that of the number of lyricists. 
+So in some rough sense the lyrics of the songs are much diverse than the music itself. Also, observe the number of unique tokens (words) is third of the total number of words (remember stopwords are already removed).
+
+
+Remove unnecessary variables to free up storage.
+```{r}
+#rm(list=ls())
+rm("songs")
+```
+
+
+## Some initial simple analysis
+
+Reading the csv file containing the songs (after preprocessing) in the form of comma separated file.
+```{r}
+songs.proc <- read.csv(
+  PREPROC_PATH, 
+  header = TRUE, 
+  sep = ",", 
+  stringsAsFactors = FALSE,
+  encoding = "UTF-8"
+)
+```
+
+
+### Initial investigation using the keyword حب (love).
+
+This is particularly chosen as Shadia is mostly famous for the romantic themes.
+
+Extract all subwords containing the word "حب", including repetitions.
+```{r}
+keyword <- as_utf8("\u062D\u0628")  # the keyword حب
+ 
+songs.2.1 <- songs.proc %>%
+   dplyr::filter(grepl(keyword, Word))
+```
+
+
+```{r}
+cat("Total number of occurences of words containing the subword \u062D\u0628 (with repititions) accross all songs: \n")
+cat(nrow(songs.2.1), "\n")
+cat("Out of a total number of ", nrow(songs.proc), " words.\n")
+cat("Note that all these counts include repititions.\n")
+cat("Percentage is: ", (nrow(songs.2.1) / nrow(songs.proc)) * 100, "%\n")
+```
+
+```{r}
+cat("Total number of occurences of words containing the subword \u062D\u0628 (without repititions) accross all songs: \n")
+cat(n_distinct(songs.2.1$Word), "\n")
+cat("Out of a total number of ", n_distinct(songs.proc$Word), " words.\n")
+cat("Note that all these counts exclude repititions.\n")
+cat("Percentage is: ", (n_distinct(songs.2.1$Word) / n_distinct(songs.proc$Word)) * 100, "%\n")
+```
+Note that from the previous two cells, the unique derivatives of the subword حب constitute a fraction of the total unique words that is less than half of all mentions with respect to all 
+words that include repetitions. However, on the other hand, 163 derivatives is a large number of that subword حب.
+
+```{r}
+cat("Number of songs with lyrics containing the subword \u062D\u0628: \n")
+cat(length(unique(songs.2.1$Song)), "\n")
+cat("Out of a total of: ", length(unique(songs.proc$Song)), " songs.\n")
+cat("Percentage is: ", (length(unique(songs.2.1$Song))/ length(unique(songs.proc$Song))) * 100, "%\n")
+```
+This high percentage gives an indication that Shadia was more into the romantic theme.
+
+```{r}
+cat("Songs with lyrics containing the subword \u062D\u0628: \n")
+print(unique(songs.2.1$Song))
+```
+
+Next we get and sample of the songs containing the subword حب (love) along with some information about the song and the corresponding inclusive words. The frequency column indicates the number of words in the corresponding song that
+includes the subword حب (love).
+```{r}
+songs.2.1 <- songs.2.1 %>%
+  group_by(Song) %>%
+  mutate(Frequency = n()) %>%
+  ungroup()
+```
+
+
+```{r}
+songs.2.1 <- songs.2.1 %>%
+   distinct() %>% 
+   filter(!is.na(Composer)) %>%
+   filter(!is.na(Lyricist)) %>% 
+   mutate(Composer_2 = paste(Composer_first_name, Composer_last_name)) %>%
+   mutate(Lyricist_2 = paste(Lyricist_first_name, Lyricist_last_name))  %>% 
+   dplyr::select(Word, Song, Year, Decade, Composer = Composer_2, Lyricist = Lyricist_2, Frequency) 
+```
+
+
+```{r}
+songs.2.1 <- songs.2.1 %>%
+  arrange(desc(Frequency))
+```
+
+```{r}
+# Remove rows with NA Values in any column:
+songs.2.1 <- songs.2.1 %>% 
+  na.omit()
+```
+
+The following code cell generates one sample from each song.
+```{r}
+songs.2.2 <- songs.2.1 %>%
+  group_by(Song) %>%
+  sample_n(1)
+```
+
+
+Next we only select a smaller random sample of songs.
+```{r}
+n_samples <- 20  # number of random songs that contains the word "حب"(love)
+
+songs.2.2 <- songs.2.2 %>%
+  ungroup() %>%
+  sample_n(n_samples) 
+```
+
+
+```{r}
+kbl(songs.2.2) %>% 
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+Free up memory
+```{r}
+rm("songs.2.1")
+rm("songs.2.2")
+```
+
+### Initial investigation using the keyword وطن (homeland).
+
+This is particularly chosen as Shadia is also famous for the nationalistic and patriotic themes.
+
+Extract all subwords containing the word "وطن", including repetitions.
+
+```{r}
+keyword <- as_utf8("\u0648\u0637\u0646")  # the keyword وطن
+
+songs.2.1 <- songs.proc %>%
+   dplyr::filter(grepl(keyword, Word))
+```
+
+```{r}
+cat("Total number of occurences of words containing the subword \u0648\u0637\u0646 (with repititions) accross all songs: \n")
+cat(nrow(songs.2.1), "\n")
+cat("Out of a total number of ", nrow(songs.proc), " words.\n")
+cat("Note that all these counts include repititions.\n")
+cat("Percentage is: ", (nrow(songs.2.1) / nrow(songs.proc)) * 100, "%\n")
+```
+
+```{r}
+cat("Total number of occurences of words containing the subword \u0648\u0637\u0646 (without repititions) accross all songs: \n")
+cat(n_distinct(songs.2.1$Word), "\n")
+cat("Out of a total number of ", n_distinct(songs.proc$Word), " words.\n")
+cat("Note that all these counts exclude repititions.\n")
+cat("Percentage is: ", (n_distinct(songs.2.1$Word) / n_distinct(songs.proc$Word)) * 100, "%\n")
+```
+It seems from the previous two cells that there are not many repetitions of the words containing وطن as a subword.
+
+```{r}
+cat("Number of songs with lyrics containing the subword \u0648\u0637\u0646: \n")
+cat(length(unique(songs.2.1$Song)), "\n")
+cat("Out of a total of: ", length(unique(songs.proc$Song)), " songs.\n")
+cat("Percentage is: ", (length(unique(songs.2.1$Song))/ length(unique(songs.proc$Song))) * 100, "%\n")
+```
+
+So this would imply that Shadia has at least 7 songs with nationalistic theme.
+
+```{r}
+cat("Songs with lyrics containing the subword \u0648\u0637\u0646: \n")
+unique(songs.2.1$Song)
+```
+
+```{r}
+songs.2.1 <- songs.2.1 %>%
+  group_by(Song) %>%
+  mutate(Frequency = n()) %>%
+  ungroup()
+```
+
+```{r}
+songs.2.1 <- songs.2.1 %>%
+   distinct() %>%
+   filter(!is.na(Composer)) %>%
+   filter(!is.na(Lyricist)) %>% 
+   mutate(Composer_2 = paste(Composer_first_name, Composer_last_name)) %>%
+   mutate(Lyricist_2 = paste(Lyricist_first_name, Lyricist_last_name))  %>% 
+   dplyr::select(Word, Song, Year, Decade, Composer = Composer_2, Lyricist = Lyricist_2, Frequency) 
+```
+
+```{r}
+songs.2.1 <- songs.2.1 %>%
+  arrange(desc(Frequency))
+```
+
+```{r}
+# Remove rows with NA Values in any column:
+songs.2.1 <- songs.2.1 %>% na.omit()
+```
+
+```{r}
+songs.2.2 <- songs.2.1 %>%
+  dplyr::filter(Composer != " ")
+```
+
+
+```{r}
+kbl(songs.2.2) %>% 
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+Free up memory
+```{r}
+rm("songs.2.1")
+rm("songs.2.2")
+```
+
+
+### Initial investigation using the keyword الله (ALLAH).
+
+<mark> %%% wg: This should be done as well for Abdel Halim.</mark>
+
+This is particularly chosen as Shadia is also famous for the religious and/or spirtual themes.
+
+Extract all subwords containing the word "الله", including repetitions.
+```{r}
+keyword <- as_utf8("\u0627\u0644\u0644\u0647")  # the keyword الله
+
+songs.2.1 <- songs.proc %>%
+   dplyr::filter(grepl(keyword, Word))
+```
+
+
+```{r}
+cat("Total number of occurences of words containing the subword \u0627\u0644\u0644\u0647 (with repititions) accross all songs: \n")
+cat(nrow(songs.2.1), "\n")
+cat("Out of a total number of ", nrow(songs.proc), " words.\n")
+cat("Note that all these counts include repititions.\n")
+cat("Percentage is: ", (nrow(songs.2.1) / nrow(songs.proc)) * 100, "%\n")
+```
+
+```{r}
+cat("Total number of occurences of words containing the subword \u0627\u0644\u0644\u0647 (without repititions) accross all songs: \n")
+cat(n_distinct(songs.2.1$Word), "\n")
+cat("Out of a total number of ", n_distinct(songs.proc$Word), " words.\n")
+cat("Note that all these counts exclude repititions.\n")
+cat("Percentage is: ", (n_distinct(songs.2.1$Word) / n_distinct(songs.proc$Word)) * 100, "%\n")
+```
+It seems from the previous two cells that there are not many repetitions of the words containing الله as a subword.
+
+```{r}
+cat("Number of songs with lyrics containing the subword \u0627\u0644\u0644\u0647: \n")
+cat(length(unique(songs.2.1$Song)), "\n")
+cat("Out of a total of: ", length(unique(songs.proc$Song)), " songs.\n")
+cat("Percentage is: ", (length(unique(songs.2.1$Song))/ length(unique(songs.proc$Song))) * 100, "%\n")
+```
+So this would imply that Shadia has about 68 songs with religious/spiritual theme.
+```{r}
+cat("Songs with lyrics containing the subword \u0627\u0644\u0644\u0647: \n")
+unique(songs.2.1$Song)
+```
+
+```{r}
+songs.2.1 <- songs.2.1 %>%
+  group_by(Song) %>%
+  mutate(Frequency = n()) %>%
+  ungroup()
+```
+
+```{r}
+songs.2.1 <- songs.2.1 %>%
+   distinct() %>%
+   filter(!is.na(Composer)) %>%
+   filter(!is.na(Lyricist)) %>% 
+   mutate(Composer_2 = paste(Composer_first_name, Composer_last_name)) %>%
+   mutate(Lyricist_2 = paste(Lyricist_first_name, Lyricist_last_name))  %>% 
+   dplyr::select(Word, Song, Year, Decade, Composer = Composer_2, Lyricist = Lyricist_2, Frequency) 
+```
+
+```{r}
+songs.2.1 <- songs.2.1 %>%
+  arrange(desc(Frequency))
+```
+
+```{r}
+# Remove rows with NA Values in any column:
+songs.2.1 <- songs.2.1 %>% na.omit()
+```
+
+```{r}
+songs.2.2 <- songs.2.1 %>%
+  dplyr::filter(Composer != " ")
+```
+
+```{r}
+no_samples <- 20
+
+songs.2.3 <- songs.2.2 %>%
+  group_by(Song) %>%
+  sample_n(1) %>%
+  arrange(desc(Frequency))
+
+songs.2.3 <- songs.2.3[1:no_samples,]
+```
+
+
+```{r}
+kbl(songs.2.3) %>% 
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+Free up memory
+```{r}
+rm("songs.2.1")
+rm("songs.2.2")
+```
+
+## Temporal Rate of Singing Performance
+
+In this subsection we study the evolution of the songing activity in terms of the number of songs produced per year as a fine scale and per decade as a more coarse scale.
+
+```{r}
+songs.freq <- songs.proc %>%
+  dplyr::select(Year, Song) %>%
+  distinct() %>%
+  group_by(Year) %>%
+  na.omit() %>%
+  summarize(num_songs = n()) %>%
+  arrange()
+```
+
+```{r}
+songs.freq.plot <- songs.freq %>%
+  ggplot(aes(x = Year, y = num_songs)) + 
+  geom_point(
+    alpha = 0.4,
+    color = "darkblue",
+    size = 2,
+    position = "jitter"
+  ) + 
+  stat_smooth(
+    color = "black",
+    se = TRUE,  # display confidence interval around smooth
+    method = "lm"  # smoothing method
+  ) +
+  geom_smooth(
+    se = TRUE,
+    color = "red",
+    lwd = 1
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45),
+    text = element_text(size = 10)
+  ) +
+  ggtitle("Distribution of Number of Songs over the Years") +
+  xlab("") + 
+  ylab("") +
+  scale_x_continuous(breaks = seq(min(songs.freq$Year), max(songs.freq$Year), 1)) +
+  scale_y_continuous(breaks = seq(0, max(songs.freq$num_songs), 5)) 
+```
+
+```{r}
+songs.freq.plot
+```
+
+As is evident the singing rate is highest at the beginning of Shadia's artistic career and then gradually decreases over time. The line estimator gives us a rough decline rate of $\frac{17.84 - 0.14}{1986 - 1948} \approx 0.5$, which roughly means that there is a decrease 
+of one song for every couple of years during the whole singing period of Shadia. This is, to a large extent, corroborated by the other smoothing curve which is generated using the loess method (Local Polynomial Regression Fitting). The grey cloud around each 
+estimating curve is the $0.95$ confidence interval. We see a peak in 1951 with $31$ songs and the lowest around mid 1980s of just one song per year.
+
+```{r}
+ggsave("./figs/songs_frequency_per_year.pdf", songs.freq.plot, dpi = 1000, device = "pdf")
+```
+
+```{r}
+rm("songs.freq")
+```
+
+
+We now give a coarse illustration of the evolution of the singing activity over the decades. <mark>%%% wg: Put abdel halim in the same bar plot for comparison.</mark>
+
+```{r}
+songs.freq.decade <- songs.proc %>%
+  dplyr::select(Decade, Song) %>%
+  distinct() %>%
+  group_by(Decade) %>%
+  na.omit() %>%
+  summarize(num_songs = n()) 
+```
+
+
+```{r}
+songs.freq.decade <- songs.freq.decade %>%
+  mutate(years = as.numeric(parse_number(Decade))) %>%
+  mutate(part = ifelse(grepl("Early", Decade), 0, 1))
+```
+
+
+```{r}
+ songs.freq.decade <- songs.freq.decade %>%
+  arrange(years, part) #%>%
+  #mutate(.r = row_number())
+```
+
+```{r}
+songs.freq.decade <- within(
+  songs.freq.decade, 
+  Decade <- factor(Decade, levels = c("Late 1940s" , "Early 1950s", "Late 1950s", "Early 1960s", "Late 1960s", "Early 1970s", "Late 1970s", "Early 1980s", "Late 1980s"))
+)
+```
+
+```{r}
+songs.freq.decade.plot <- songs.freq.decade %>%
+  ggplot(aes(x = Decade, y = num_songs)) + 
+  geom_bar(
+    fill = "darkblue",
+    stat = "identity",
+    size = 0.1
+  ) + 
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45),
+    text = element_text(size = 10)
+  ) +
+  ggtitle("Distribution of Number of Songs over the Decades") +
+  xlab("Decade") + 
+  ylab("Number of songs") #+
+  # scale_x_continuous(breaks = seq(min(songs.freq$Year), max(songs.freq$Year), 1)) +
+  # scale_y_continuous(breaks = seq(0, max(songs.freq$num_songs), 5)) 
+
+```
+
+```{r}
+songs.freq.decade.plot
+```
+
+It is clear that Shadia was extremely active in the rather early part of her career, namely, in the early 1950s. She sang more than $120$ songs in this period which is by far grater than (more than double) the next active decade. This is a consistent 
+decrease in the number of performed songs over the decades with a bit of exception in the early 1970s. The very early and very late can be considered anomalous or rather boundary conditions .
+
+## Text Mining
+
+**Text mining** can also be thought of as text analytics. The goal is to discover relevant information that is possibly unknown or hidden in the text. **Natural Language Processing** (NLP) is one methodology that can be used in mining text. It tries to decipher the ambiguities 
+and complications in written language by tokenization, clustering, extracting entity and word relationships, and using algorithms to identify themes and quantify subjective information. We will begin by breaking down the concept of **lexical complexity**.
+
+Lexical complexity can be described by a combination of these measures: 
+- Word frequency: number of words per song. 
+- Word length: average length of individual words in the songs lyrics. 
+- Lexical diversity: number of unique words used in the song vocabulary. 
+- Lexical density: the number of unique words divided by the total number of words (word repetition).
+
+### Studying word frequency
+
+In music, individual word frequencies carry a great deal of significance, whether it be repetition or rarity. 
+
+Both cases affect **memorability** of the entire song itself. One important goal of lyrics analysis, as well as for songwriter, is to know whether there is a *correlation between word frequency and hit songs*. So we take the tidy format one step further and get a summarized count of words per song.
+
+Here we consider all words in the song's lyrics as opposed to just distinct words.
+```{r}
+full_word_count <- songs.proc %>%
+  mutate(Composer_2 = paste(Composer_first_name, Composer_last_name)) %>%
+  mutate(Lyricist_2 = paste(Lyricist_first_name, Lyricist_last_name))  %>%
+  group_by(Song) %>%
+  mutate(num_words = n()) %>%
+  dplyr::select(Song, num_words, Year, Composer, Lyricist) %>%
+  distinct() %>%
+  arrange(desc(num_words)) 
+```
+
+In the following we show a sample of topmost songs in terms of the size of the song's lyrics.
+```{r}
+topmost <- 15
+
+test_sample <- full_word_count[1:topmost,]  %>%
+  ungroup(num_words, Song) %>%
+  mutate(num_words = num_words)  %>%
+  mutate(Song = Song) #%>%
+  # kable("html", escape = FALSE, align = "c", caption = "Songs With Highest Word Count") %>%
+  # kable_styling(bootstrap_options = c("striped", "condensed", "bordered"),
+  #                  full_width = FALSE)
+```
+
+
+```{r}
+test_sample %>% 
+  kable(align = "c") %>%
+  kable_paper() %>% 
+  column_spec(1, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "orange") %>%
+  column_spec(2, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "lightblue") %>%
+  column_spec(3, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "orange") %>%
+  column_spec(4, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "lightblue") %>%
+  column_spec(5, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "orange")
+  #column_spec(1, color = "black", background = spec_color(mtcars$drat[1:2],end = 0.7)) %>%
+  #column_spec(2, color = "black", background = spec_color(mtcars$drat[5:6],end = 0.7)) 
+```
+
+Note that about half of the longest songs were created in the 1960's. This can be attributed to the fact that many songs in the 1960s were sung in theaters as contrast to movies acted by Shadia. Songs in movies are by nature short, whereas those
+acted on theaters or other kinds of media tend to be longer. She participated in lower number of movies in
+1960s (23 films) compared to 1950s (70 films). Evidently songs in the movies have to be short.
+
+Computing total number of words and characters.
+```{r}
+n_words <- nrow(songs.proc)
+n_unique_words <- length(unique(songs.proc$Word))
+
+cat("Total number of words: ", n_words, " \n")
+cat("Total number of unique words: ", n_unique_words, " \n")
+cat("Percentage of unique words: ", (n_unique_words / n_words) * 100, "% \n")
+```
+
+Free up memory
+```{r}
+rm("full_word_count")
+rm("test_sample")
+```
+
+
+### Studying word count distribution
+
+Here we study the lyrics lengths over the whole career of Shadia. We show a histogram overlaid with kernel density curve for the distribution of lengths for songs.
+```{r}
+lyrics_len_dist <- songs.proc %>%
+  dplyr::select(Song, Word) %>%
+  group_by(Song) %>%
+  mutate(num_words = n()) %>%
+  dplyr::select(Song, num_words) %>%
+  distinct()
+```
+
+```{r}
+estimate_mode <- function(x) {
+  d <- density(x)
+  d$x[which.max(d$y)]
+}
+
+mean_count <- mean(lyrics_len_dist$num_words)
+median_count <- median(lyrics_len_dist$num_words)
+mode_count <- estimate_mode(lyrics_len_dist$num_words)
+```
+
+```{r}
+lyrics_len_dist.plot <- lyrics_len_dist %>%
+  ggplot() +
+  geom_histogram(
+    aes(x = num_words),
+    stat = "density",
+    color = "black",
+    linewidth = 0.15
+  ) +
+  geom_vline(
+    xintercept = mean_count, 
+    color = "blue", 
+    linetype = "dashed"
+  ) +
+  geom_text(
+    aes(x = mean_count + 30, y = 0.011), 
+    color = "blue",
+    label = paste("Mean = ", as.character(floor(mean_count))),
+    hjust = 1, 
+    size = 3
+  ) +
+  geom_vline(
+    xintercept = median_count, 
+    color = "red", 
+    linetype = "dashed"
+  ) +
+  geom_text(
+    aes(x = median_count + 40, y = 0.01, color = "red"),
+    label = paste("Median = ", as.character(floor(median_count))),
+    hjust = 1, 
+    size = 3
+  ) +
+  geom_vline(
+    xintercept = mode_count, 
+    color = "green", 
+    linetype = "dashed"
+  ) +
+  geom_text(
+    aes(x = mode_count - 10, y = 0.011),
+    color = "darkgreen",
+    label = paste("Mode = ", as.character(floor(mode_count))),
+    hjust = 1, size = 3
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45),
+    text = element_text(size = 10)
+  ) +
+  guides(fill = FALSE) +
+  ggtitle("Lyrics Length per Song") +
+  labs(x = "", y = "") +
+  scale_x_continuous(breaks = seq(0, max(lyrics_len_dist$num_words), 50))
+```
+
+
+```{r}
+lyrics_len_dist.plot
+```
+It is apparent from the figure that the average lyrics length per song is 73 words.  The most typical lyrics length is about 52 words (the mode). 
+Finally, the median is 65 words, which means that the number of songs with shorter length than the median is equal to those with length greater than the median.
+
+Estimation using right-skewed normal as well as normal distributions.
+```{r}
+# See https://community.rstudio.com/t/how-can-we-create-right-left-skewed-normal-distribution-curve-in-r/39115
+# Fitting to a right skewed normal distribution. 
+param_sndist <- snormFit(lyrics_len_dist$num_words)
+
+# Fitting to a normal distribution.
+fit <- fitdistr(lyrics_len_dist$num_words, "normal")
+param_ndist <- fit$estimate
+```
+
+
+```{r}
+right_skwed_normal_est <- ggplot(lyrics_len_dist) + 
+  stat_function(
+    aes(x = num_words),
+    col = "darkblue",
+    fun = dsnorm,
+    args = list(mean = param_sndist$par["mean"], 
+                sd = param_sndist$par["sd"],
+                xi = param_sndist$par["xi"])
+  ) +
+  geom_vline(xintercept = param_sndist$par["mean"], color = "blue", linetype = "dashed") + 
+  geom_text(
+    aes(x = 220, y = 0.008), 
+    color = "blue",
+    label = paste("Mean = ", as.character(floor(param_sndist$par["mean"])),
+                  ", sd = ", as.character(floor(param_sndist$par["sd"])),
+                  ", xi = ", as.character(floor(param_sndist$par["xi"]))
+                ),
+    hjust = 1, 
+    size = 3
+  ) +
+  xlab("") + ylab("") #+ 
+  # ggtitle("Right-skewed normal distribution to estimate the density of lyrics lengths")
+```
+
+```{r}
+normal_est <- ggplot(lyrics_len_dist) + 
+  stat_function(
+    aes(x = num_words),
+    col = "darkblue",
+    fun = dnorm,
+    args = list(mean = param_ndist["mean"], 
+                sd = param_ndist["sd"])
+  ) +
+  geom_vline(xintercept = param_ndist["mean"], color = "blue", linetype = "dashed") +
+  geom_text(
+    aes(x = 200, y = 0.007), 
+    color = "blue",
+    label = paste("Mean = ", as.character(floor(param_ndist["mean"])),
+                  ", sd = ", as.character(floor(param_ndist["sd"]))
+                ),
+    hjust = 1, 
+    size = 3
+  ) +
+  xlab("") + ylab("") #+ 
+```
+
+
+```{r, fig.width = 14, fig.height = 5}
+# grid.arrange(
+#   right_skwed_normal_est,
+#   normal_est,
+#   ncol=2
+# )
+right_skwed_normal_est + normal_est
+```
+
+It seems that the normal distribution is better suited to fit the lyrics lengths data. This is unlike the lyrics lengths of Abdel Halim Hafez where the right skewed normal is a better fit.
+
+```{r}
+#orca(lyrics_len_dist.plot, file = "./figs/lyrics_len_dist.pdf")
+#orca(right_skwed_normal_est + normal_est, file = "./figs/right_skwed_normal_est.pdf")
+ggsave("./figs/lyrics_len_dist.pdf", lyrics_len_dist.plot, dpi = 1000, device = "pdf")
+ggsave("./figs/right_skwed_normal_est.pdf", right_skwed_normal_est, dpi = 1000, device = "pdf")
+ggsave("./figs/normal_est.pdf", normal_est, dpi = 1000, device = "pdf")
+```
+
+Free up memory
+
+```{r}
+rm("lyrics_len_dist")
+rm("lyrics_len_dist.plot")
+rm("right_skwed_normal_est")
+rm("normal_est")
+```
+
+
+### Studying word count per decade
+
+This is done to see if the timeline of the career of Shadia has an effect on the length of her songs. For each decade we plot a histogram of the lengths of lyrics the for songs performed through that decade.
+```{r}
+full_word_count_decade <- songs.proc %>%
+  dplyr::select(Song, Decade, Word) %>%
+  group_by(Decade, Song) %>%
+  mutate(num_words = n()) %>%
+  dplyr::select(Song, Decade, num_words) %>%
+  distinct() 
+```
+
+
+```{r}
+full_word_count_decade <- full_word_count_decade %>%
+  mutate(year = as.numeric(parse_number(Decade))) %>%
+  mutate(part = ifelse(grepl("Early", Decade), 0, 1))
+```
+
+
+```{r}
+full_word_count_decade <- full_word_count_decade %>%
+  arrange(year, part) %>%
+  mutate(Song_c = 1)
+```
+
+```{r}
+full_word_count_decade <- within(
+  full_word_count_decade, 
+  Decade <- factor(Decade, levels = c("Late 1940s" , "Early 1950s", "Late 1950s", "Early 1960s", "Late 1960s", "Early 1970s", "Late 1970s", "Early 1980s", "Late 1980s"))
+)
+```
+
+The longest song.
+```{r}
+# Finding the longest song.
+
+max_s <- max(full_word_count_decade$num_words)
+i_max <- which(full_word_count_decade$num_words == max_s)
+print(full_word_count_decade[i_max,])
+```
+
+The shortest song.
+```{r}
+# Finding the shortest song.
+
+# The following exlcudes songs where lyrics are not available
+temp_for_min <- full_word_count_decade %>%
+  dplyr::filter(num_words > 1)
+
+min_s <- min(temp_for_min$num_words)
+i_min <- which(temp_for_min$num_words == min_s)
+print(temp_for_min[i_min,])
+```
+
+```{r}
+# fig.width = 20, fig.height = 5, fig.align="center"
+full_word_count_decade <- within(full_word_count_decade, 
+                                     Decade <- factor(Decade, levels = c("Late 1940s" , "Early 1950s", "Late 1950s", "Early 1960s", "Late 1960s", 
+                                                                         "Early 1970s", "Late 1970s", "Early 1980s", "Late 1980s")))
+
+full_word_count_decade.plot <- full_word_count_decade %>%
+  ggplot() +
+  geom_histogram(
+    aes(x = num_words, fill = Song_c), 
+    boundary = 0, 
+    binwidth = 100, 
+    color = "black"
+  ) + 
+  facet_wrap(~Decade, scales = "free") +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45),
+    text = element_text(size = 6.5),
+    panel.spacing = unit(1, "lines")
+  ) +
+  guides(fill = FALSE) + 
+  ggtitle("Evolution of Song Length Across Decades") + 
+  labs(x = NULL, y = "Song Count") +
+  scale_x_continuous(
+    breaks = seq(0, max(full_word_count_decade$num_words) + 100, 100),
+    limits = c(0,max(full_word_count_decade$num_words) + 100)) +
+  scale_y_continuous(
+    breaks = function(x) unique(floor(pretty(seq(0, (max(x) + 1) * 1.1))))
+  )
+
+full_word_count_decade.plot <- ggplotly(full_word_count_decade.plot)
+```
+
+```{r}
+full_word_count_decade.plot
+```
+
+Note that in the claculation of lyrics lengths, the lyrics were preprocessed and stopwords were removed. So the length only includes the significant informative words in the song. 
+<mark>%%% wg: I am not sure if this was done with Abdel Halim, possbily yes, but with much shorter word length, so may need to do the same with Abdel Halim when comparing the two singers.</mark>
+
+It is apparent that almost all lyrics of Shadia are short, specially in comparison with those of Abdel Halim Hafez. Most of the songs are less than 200 words. The lengths of songs increase as she progressed in her career life. So the early period 
+of her artistic career is characterized by short and very short songs. The peak of her artistic productively is the 1950s, with essentially short songs that were performed mostly in movies acted by her. Only two songs were performed in the late 1980s, one is short and 
+the other is rather long.
+
+As seen above the longest song was performed in the early 1960s, and is called "نشيد فجر جديد", with length 592 words. The sortest song is called "مايكونش ده اللي اسمه الهوي", and is performed in 1950, with a length of 10 words. 
+Remember that stopwords are removed from the lyrics (an extensive list of more 10,000 stopwords are used).
+
+Starting from late 1970s, Shadia was not very active on singing. In the following we compute some statistics the singing activity of Shadia.
+```{r}
+unknown_dates <- full_word_count_decade %>%
+  dplyr::filter(is.na(year) || year == "" || is.null(year)) %>%
+  distinct()
+
+known_dates <- full_word_count_decade %>%
+  dplyr::filter(!is.na(year) && year != "" && !is_null(year)) %>%
+  distinct()
+
+start_year <- min(known_dates$year) # start year of certified songs
+end_year <- max(known_dates$year) # end year of certified songs
+
+songs_1950s <- known_dates %>%
+  dplyr::filter(year >= 1950 && year <= 1959) %>%
+  distinct()
+
+songs_1970s_1980s <- known_dates %>%
+  dplyr::filter(year >= 1970) %>%
+  distinct()
+
+cat("Period of sings from: ", start_year, " to ", end_year, "\n")
+cat("Number of songs with unknow date: ", nrow(unknown_dates), " which is ", (nrow(unknown_dates) / nrow(full_word_count_decade) * 100), "% of total number of songs.\n")
+cat("Number of songs in the 1950s: ", nrow(songs_1950s), " which is ", (nrow(songs_1950s) / nrow(known_dates)) * 100, "% of all songs with known dates.\n")
+cat("Number of songs in the 1970s and 1980s: ", nrow(songs_1970s_1980s), " which is ", (nrow(songs_1970s_1980s) / nrow(known_dates)) * 100, "% of all songs with known dates.\n")
+```
+
+```{r}
+ orca(full_word_count_decade.plot, file = "./figs/full_word_count_decade.pdf")
+# ggsave("./figs/full_word_count_decade.pdf", full_word_count_decade.plot, dpi = 1000, device = "pdf")
+```
+
+Free up memory
+
+```{r}
+rm("full_word_count_decade")
+rm("full_word_count_decade.plot")
+rm("unknown_dates")
+rm("known_dates")
+rm("songs_1950s")
+rm("songs_1970s_1980s")
+```
+
+## Popular words
+
+Here we do a simple evaluation of the most frequently used words in the full set of lyrics.
+```{r}
+no_top_words <- 20
+
+top_words <- songs.proc %>%
+  dplyr::select(Word) %>%
+  group_by(Word) %>%
+  summarize(word_freq = n()) %>%
+  top_n(no_top_words) %>%
+  ungroup() %>%
+  arrange(word_freq) %>%
+  na.omit()
+```
+
+```{r}
+top_words.plot <- top_words %>%
+  ggplot() +
+  geom_col(aes(x = factor(Word, levels = unique(Word)), y = word_freq), width = 0.6) +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.title = element_blank(),
+        panel.grid.minor = element_blank()) +
+  labs(x = NULL, y = "Word Count") +
+  scale_y_continuous(breaks = seq(0, max(top_words$word_freq), 25) + 50) +
+  coord_flip()
+
+top_words.plot <- ggplotly(top_words.plot)
+```
+
+```{r}
+top_words.plot
+```
+
+The top figure studies the significance of word tokens from the perspective of their frequency of occurrence in the whole corpus of lyrics. More rigorous means of studying words significance will be described later below.
+As can be seen, the most frequent word is "قلبي" (my heart). This can be attributed to the fact that "heart" is essential in almost all genres of Egyptian culture. 
+It caries romantic feelings, as well as nationalistic, religious, and spiritual emotions. It is worth observing that the word "الله" (ALLAH/GOD) appears in the top list twice, the second time with the conjunctive "and" as "والله"(and ALLAH).
+The pair of appearances if counted together will boost it to the top of the list indicating that Shadia, even though predominantely romantic singer, always carry a spiritual attitudes in her songs.
+
+
+Other top words that have romantic meanings include "حبيبى" (my love/my darling), "حب" (love), "بحبك" (I love you), "الهوى" (adoring). 
+Other popular words carry patriotic/nationalistic themes such as "مصر" (Egypt) and "بلدنا" (our country). Some other words are very generic such as "الدنيا" (The Word) and "ليله" (a night); their intended themes need to be studied 
+in a more n-gram context.
+<mark> %%% wg: compare with Abdel Halim </mark>
+
+ 
+Several other words in the list such as "فين" (where) and "حاجه" (need) are mostly stopwords that are missed from our stopwords database. That is why we have used a list of top 20 words instead of the intended 10 words in order to account for that kind of noise.
+
+```{r}
+# p <- ggplot(test, aes(x = factor(1), y= log(word_freq))) + 
+#   geom_boxplot(outlier.color = "red", varwidth = TRUE) +
+#   scale_x_discrete(limits=c()) + 
+#   stat_summary(fun = "mean", geom = "point", shape = 2, size = 3, color = "blue") #+
+#   #scale_fill_manual(values = c("#0099f8", "#e74c3c", "#2ecc71")) +
+#   # stat_summary(
+#   #   geom = "text",
+#   #   fun = quantile,
+#   #   aes(label = sprintf("%1.1f", ..y..)),
+#   #   position = position_nudge(x = 0.13), 
+#   #   size=3.5
+#   # ) #+ 
+#   #theme_classic() #+
+#   # theme(
+#   #   plot.title = element_text(color = "#0099f8", size = 16, face = "bold", hjust = 0.5),
+#   #   plot.subtitle = element_text(face = "bold.italic", hjust = 0.5),
+#   #   plot.caption = element_text(face = "italic")
+#   # )
+# 
+# #p
+# 
+#   #scale_y_log10()
+# ggplotly(p, hoverinfo = "test") %>%
+#   add_boxplot(hoverinfo = "x") %>%
+#   layout(xaxis = list(hoverformat = ".2f"))
+        
+```
+
+In the following we analyze the distribution of word frequencies using boxplots.
+```{r}
+top_words <- songs.proc %>%
+  dplyr::select(Word) %>%
+  group_by(Word) %>%
+  summarize(word_freq = n()) %>%
+  ungroup() %>%
+  arrange(desc(word_freq))
+
+word_freqs <- top_words$word_freq
+```
+
+The graph will be plotted for logrithm of frequencies for proper visualization as most of the data re on the lower quantiles.
+```{r}
+# Ploting a boxplot for the distribution of word frequencies.
+qu = quantile(log(word_freqs))
+
+
+plot_ly(x = log(word_freqs), name = "Word Frequency (log scale)") %>% 
+  add_boxplot(hoverinfo = "x") %>%
+  layout(xaxis = list(hoverformat = ".2f")) #%>%
+  #add_text(x = 0, y = 0, textposition = c(10,20), text = paste("75%: ", qu[3]))
+```
+
+The boxplot indicates that there is a diverse bias towards low frequencies. The third quantile is $q3 = 1.1$ corresponding to only three occurrences. The maximum $q4 = 2.71$ corresponding to about $15$ occurrences. The rest are considered as anomalies starting
+from $16$ repetitions upto the maximum rate of $226$. So most of the mass of word frequencies are below $16$ occurrences. So with respect to this corpus of lyrics large enough repetitions start with $16$ occurrences. As the chunk below indicates the number of most frequent words are $1051$ out of a total of $9407$ accounting for about $11.17\%$.
+
+```{r}
+nrow(top_words %>%
+       filter(word_freq > 5))
+nrow(top_words)
+```
+
+
+```{r}
+orca(top_words.plot, file = "./figs/top_words.pdf")
+# ggsave("./figs/top_words.pdf", top_words.plot, dpi = 1000, device = "pdf")
+```
+
+```{r}
+rm("top_words")
+rm("top_words.plot")
+```
+
+## Word cloud
+
+Word cloud is a *graphical* representation of words frequencies, where it gives greater prominence to words that appear more frequently.
+Word clouds are insightful, visually engaging, and  present text data in a simple and clear format, that of a cloud in which the size of the words depends on some respective significance measaure (for example, frequency of occurrence). 
+As such, they are visually nice to look at as well as easy and quick to understand.
+They are incredibly handy for anyone wishing to communicate a basic insight based on text data — whether it’s to analyse a speech, capture the conversation on social media or report on customer reviews.
+
+```{r}
+word_cloud <- songs.proc %>%
+  dplyr::select(Word) %>%
+  group_by(Word) %>%
+  summarize(freq = n()) %>%
+  arrange(desc(freq)) %>%
+  na.omit()
+```
+
+
+```{r}
+word_cloud.plot <- word_cloud %>% 
+  wordcloud2(
+    size = 1, 
+    fontWeight = "normal", 
+    gridSize = 10
+  )
+```
+
+
+```{r}
+word_cloud.plot
+```
+
+More indicative words are apparent from the word cloud such as: "مصر" (Egypt), "الجماهير" (the masses), "بلدنا" (our home country), all of these carry nationalistic themes.
+
+```{r}
+rm("word_cloud")
+rm("word_cloud.plot")
+```
+
+
+## Popular words per decade
+
+So far we have studied the top words across all songs. What happens if we break them up by decade? Are some words more prevalent in songs that over certain decade(s)? These may be considered popular words by society with certain moods, political atmosphere, socioeconomic 
+context, etc.
+```{r}
+total_words_per_decade <- songs.proc %>%
+  dplyr::select(Decade, Word) %>%
+  group_by(Decade) %>%
+  mutate(freq = n()) %>%
+  dplyr::select(Decade, freq) %>%
+  distinct()
+```
+
+In the following we give a table of the total number of words of all songs performed in each decade.
+```{r}
+tab <- data.table::transpose(total_words_per_decade)
+colnames(tab) <- tab[1,]
+#formattable(tab[2,], row.names = FALSE, align = rep("c", ncol(tab)))
+print(tab[2,], row.names = FALSE)
+```
+It is apparent that the early 1950s witnessed the zenith of Shadia's artistic career with a rich large set of words. <mark>%%% wg: should support this with the number of songs in the same period.</mark> Also, from the early 1950s till mid 1960s, which around 15 years, 
+correspond to the most active among her total career which spans more than 40 years.
+
+```{r}
+no_of_tops <- 10
+
+top_words_per_decade <- songs.proc %>%
+  dplyr::select(Decade, Word) %>%
+  group_by(Decade, Word) %>%
+  mutate(freq = n()) %>%
+  distinct() %>%
+  ungroup() %>%
+  group_by(Decade) %>%
+  slice(seq_len(no_of_tops)) %>%
+  arrange(desc(freq), .by_group = TRUE)
+  #top_n(n = 10, wt = freq)
+```
+
+
+```{r}
+top_words_per_decade <- top_words_per_decade %>%
+  mutate(years = as.numeric(parse_number(Decade))) %>%
+  mutate(part = ifelse(grepl("Early", Decade), 0, 1))
+```
+
+```{r}
+top_words_per_decade <- top_words_per_decade %>%
+  arrange(years, part) #%>%
+  #mutate(.r = row_number())
+```
+
+```{r}
+top_words_per_decade <- within(
+  top_words_per_decade, 
+  Decade <- factor(
+    Decade, 
+    levels = c("Late 1940s" , "Early 1950s", "Late 1950s", "Early 1960s", "Late 1960s", "Early 1970s", "Late 1970s", "Early 1980s", "Late 1980s")
+  )
+)
+```
+
+
+```{r}
+top_words_per_decade.plot <- top_words_per_decade %>%
+  ggplot() +
+  geom_col(
+    aes(x = reorder_within(Word, freq, Decade), 
+        y = freq
+      ), 
+    #width = 0.6
+  ) + 
+  facet_wrap(~Decade, scales = "free") +
+  scale_x_reordered() + 
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    text = element_text(size = 9),
+    panel.spacing.y = unit(0.5, "lines"),
+    panel.spacing.x = unit(0.1, "lines")
+  ) +
+  #theme_cowplot(font_size = 8) +
+  coord_flip() + 
+  guides(fill = FALSE) + 
+  ggtitle("Top Words per Decade") + 
+  labs(x = NULL, y = "Word Count") +
+  scale_y_continuous(breaks = function(x) unique(floor(pretty(seq(0, (max(x) + 1) * 1.1))))) 
+
+#
+top_words_per_decade.plot <- ggplotly(top_words_per_decade.plot) 
+```
+
+
+```{r}
+top_words_per_decade.plot
+```
+
+<mark>%%% wg: There are several problem with this figure: not all plots have the same size I tried to solve, but I could not.</mark>
+
+Looking at the above table and figure, some interesting observations can be obtained as follows: 
+- From the table it is evident that the bulk of Shadia's performance was more towards the beginning of her career, particularly during the early 1950s. The frequency of words repetitions are very high compared with other periods. The word "قلبي" (my heary) 
+is by far the most frequent word during the 1950s.
+- The top word in the early 1960s is "حبيبي" (my love), which appears more than 50 times, making it the most frequent word per decade.
+- In the late 1940s, the very beginning of her career, the rate of repetitions are also very low. This indicates very short songs.
+- Similarly for late 1980's which had witnessed witnessed her retirement so she performed the least. 
+- In most of the decades, only one or two words are frequently repeating and the rest of the words are equally low in frequency. So such premium words carry essentially the themes of the songs.
+- It is apparent that Shadia was predominantly a romantic singer. Her nationalistic/patriotic singing appears very strongly in the early 1960s with words like: "وطني" (my homeland), "امجادو" (glories), "الوطن" (Motherland), "وانتصراته" (And his victories), "الاكبر" (the 
+greatest) etc. This is compatible with the nationalistic atmosphere that dominated Egypt and the whole of the Arab World in this period.
+There is also some nationalistic theme towards the end of her career life.
+- The frequency of popular words differ significantly over the decades. At the core years of Shadia's career, the frequency of popular words are very high. Starting from the early 1970s the frequencies of popular words drop significantly.
+This coincides with a shift in the socio-politial system in Egypt from socialism and nationalistic atmosphere into a capitalist more religious atmoshpere. It is worth investigating if these events are correlated or just mere coincidence.
+- As expected the romantic theme is dominant in many decades. However, there are some interesting differences in the words that express this theme. Words get more complicated over the decades both syntactically and semantically. Lyrics carry simple emotions prevail in the Late 1940s such as "متهيالك" (Apparent to You), "قول" (say), "حيرانه" (I am confused). Emotions get deeper and more intense in the early 1950's with words such as "قلبى" (my heart), "كيانى" (my being), and "يا حلوه" (oh beautiful). 
+In the late 1960s, words get more abstract, such as "الشوق" (the desire), "مخاصمنى" (quarreled with me), "حسه" (feel). The 1970s in general witnessed a revert to simple words, though a bit less romantic and sensitive than the early period. And actually it is more difficult to detect the themes of songs in these periods without taking in more n-grams. Words in this period include "شراع" (sail), "ظلال" (shadows), "ياريت"  (I wish), "هتعرف" (you will know), and "شعاع" (beam). <mark> %%% wg This last point needs more investigation, specially when compared with Abdel Halim. Abdel Halim was much more deeper. </mark>
+- Although many words carry similar semantic meanings and themes spread over the whole career period of Shadia, there is no single word that is timeless, that is, top popular across all the decades. This might indicate the diversity and continuous evolution of Shadia from one perspective. From another perspective this indicates the continuous radical changes in the political social and economic conditions in Egypt, and the whole of the Arab world, during her career life. It might as well indicate the diversity of composers and lyricists that Shadia used to work with across different stages of her career. This can be investigated more thoroughly from the dataset we are working on.
+- The last plot gives words with high frequencies whose performance years are missing from the data. The top word of these is "الله " (ALLAH/God).
+
+Of course, in all that analysis we take the total number of words as indicative of the performing activities. 
+
+```{r}
+orca(top_words_per_decade.plot, file = "./figs/top_words_per_decade.pdf")
+#ggsave("./figs/top_words_per_decade.pdf", top_words_per_decade.plot, dpi = 1000, device = "pdf")
+```
+
+```{r}
+rm("top_words_per_decade")
+rm("top_words_per_decade.plot")
+```
+
+
+## Word length
+
+Word length is an interesting topic for lyricists. The longer the word, the harder it is to rhyme and squeeze into a pattern. Below we show a histogram of word lengths, that is overlaied with a Gaussian fitting curve.
+```{r}
+word_length <- songs.proc %>%
+  filter(!is.na(Word)) %>%
+  dplyr::select(Song, Decade, Word) %>%
+  # distinct() %>%
+  mutate(word_len = nchar(Word)) %>%
+  count(word_len, sort = TRUE) 
+```
+
+```{r}
+word_length$prob <- word_length$n / sum(word_length$n)
+est_mean <- round(sum(word_length$prob * word_length$word_len), 2)
+t1 <- sum(word_length$prob * (word_length$word_len)^2)
+t2 <- est_mean^2
+est_var <- t1 - t2
+est_sd <- round(sqrt(est_var), 2)
+
+word_length.plot <- word_length %>%
+  ggplot(aes(x = word_len)) +
+  geom_bar(
+    aes(y = n/sum(n)),
+    fill = "darkblue",
+    stat = "identity",
+    size = 0.1
+  ) +
+  #geom_density() + 
+  stat_function(
+    col = "red", 
+    fun = dnorm, 
+    args = list(mean = est_mean, sd = est_sd)
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    text = element_text(size = 12)
+  ) +
+  scale_x_continuous(breaks = seq(0, max(word_length$word_len), 1)) +
+  #scale_y_continuous(breaks = seq(0, max(word_length$n), 500)) #+
+  ylab("Count") +
+  xlab("Word Length") +
+  ggtitle("Distribution of Word Length over the Whole Set of Songs") +
+  geom_vline(
+    xintercept = est_mean, 
+    color = "red", 
+    linetype = "dashed"
+  ) + 
+  geom_text(
+    aes(x = 10, y = 0.25), 
+    color = "red",
+    label = paste("Mean = ", as.character(est_mean)),
+    hjust = 1, 
+    size = 3
+  ) +
+  geom_text(
+    aes(x = 10, y = 0.23), color = "red",
+    label = paste("SD = ", as.character(est_sd)),
+    hjust = 1, 
+    size = 3) #+
+
+#word_length.plot <- ggplotly(word_length.plot)
+```
+
+```{r}
+word_length.plot
+```
+The preceding figure shows a normalized histogram of the word length distribution across the whole lyrics corpus. The histogram is overlaid with the normal distribution fitting to the empirical word length distribution. The mean word length is about 
+$4.86$ characters with a standard deviation of about $1.29$. So, from the properties of the Gaussian distribution, $95\%$ of the probability mass (that is, $95\%$ of all word lengths) lies within $4.86 \pm 2*1.29$, so $95\%$ of the words in the corpus stretches 
+between $2.28$ and $7.44$  characters.
+This rather short wording indicates that Shadia was a kind of modernist in terms of short-worded lyrics with fast rythme music, that can be considered new and revolutionary at the time; which as well consided with the revolutionary changes happening in 
+Egypt and the Arab World as the time moving into more progressive policies and liberation from colonialism. We look into the rather long words through the use of word cloud as follows.
+
+```{r}
+ggsave("./figs/word_length_plot.pdf", word_length.plot, dpi = 1000, device = "pdf")
+```
+
+```{r}
+rm("word_length")
+rm("word_length.plot")
+```
+
+```{r}
+word_len_cloud <- songs.proc %>%
+  dplyr::select(Word) %>%
+  distinct() %>%
+  mutate(word_len = nchar(Word)) %>%
+  arrange(desc(word_len))
+```
+
+```{r}
+cat("Total number of distinct words in all songs: ")
+cat(nrow(word_len_cloud), "\n")
+```
+
+We show the word cloud only for only a subset of the whole set of words (the largest words).
+```{r}
+no_of_words <- 300
+
+word_len_cloud.plot <- word_len_cloud[1:no_of_words, ] %>%
+  wordcloud2(
+    gridSize = 10,
+    size = 0.15,
+    minSize = .0005,
+    ellipticity = .3,
+    rotateRatio = 1,
+    fontWeight = "bold"
+  )
+```
+
+```{r}
+word_len_cloud.plot
+```
+
+
+From the word cloud it can be noticed that the big words are largely carrying nationalistic and political meanings. For example, "بكرهااجماهير تملا" (tomorrow the masses will fill), "والاشتراكيه" (and the socialism), "والانتهازيه" (and the opportunism), "بالخمهورية" (by the republic). In additions to naming some cities that are connected with struggle against colonialism and foreign invasions: "الاسماعيليه" (Ismailia), "عالبورسعيديه" (for the people of Port Said).
+
+Still some words carry romantic and emotional tones such as "احلامنا الورديه" (our pink dreams), "الصبا والجمال" (boyhood and beauty), "انا وقلبي" (me and my heart) etc. Some words imply other themes such as "والبرتقان" (and the oranges), "والممثلين" (the actors),
+"الانسانيه" (the humanity), "الحيوانات" (the animals), "واللموناته" (the lemonade). So such words may indicate themes like playful singing for children, and popular songs specially for low-profile classes such as farmers and workers. 
+
+It is obvious that many of the largest words are actually combination of smaller words into bigger ones, which require cleverness from all parties participating in the genertion of the song including the lyricist who derived the complex word, the composer
+who made the necessary music to capture the tone of the combined words, and finally of course Shadia herself with the ability to utter these compelx words.
+
+
+Now we move to shortest words.
+```{r}
+no_of_words <- 300
+
+word_len_cloud.plot_2 <- tail(word_len_cloud, 300) %>%
+  na.omit() %>%
+  wordcloud2(
+    gridSize = 10,
+    size = 0.15,
+    minSize = .0005,
+    ellipticity = .3,
+    rotateRatio = 1,
+    fontWeight = "bold"
+  )
+```
+
+```{r}
+word_len_cloud.plot_2
+```
+
+The shortest words are very diverse in meanings and their semantic implications for the themes of the songs. Examples of words include: "زرع" (planting), "لوم" (blame), "حرب" (war), "دمع" (tear), "ويل" (woe), "موج" (see waves), "عدل" (justice), 
+"طفل" (child), "صخر" (rock), etc. It is apparent that most of the words carry strong meanings and just not auxiliary words and/or stopwords that escaped our database during the preproceesing of the lyrics. Generally, in songwriting economy of wording (shorter and lesser words 
+with more meaning) is considered one of the best lyrics writing tips. 
+As indicated in the histogram above, and from the word cloud of shortest words, it is apparent that Shadia was skillful in choosing her songs, thanks to her lyricists, 
+as these shortest words carry very strong meanings, and they are difficult to put in lyrics to develop music and singing. However, it seems harder to detect the theme(s) of the song from the shorter words, as compared with longer words.
+Many of these shortest words can't be considered typical in singing and might actually be hard to sing smoothly. This again an indication that Shasia was an able singer. <mark> %%% wg: Compare all that with Abdel Halim.</mark>.
+
+
+
+Next we give the word cloud for a random sample of the words with the most typical lengths, specifically from the histogram above, words of lengths $4$ and $5$.
+```{r}
+no_of_words <- 300
+
+indices <- which((word_len_cloud$word_len == 4) | (word_len_cloud$word_len == 5))
+random_indices <- indices[sample.int(length(indices), size = no_of_words, replace = FALSE)]
+typical_words <- word_len_cloud[random_indices,]
+```
+
+```{r}
+word_len_cloud.plot_3 <- typical_words %>%
+  wordcloud2(
+    gridSize = 10,
+    size = 0.15,
+    minSize = .0005,
+    ellipticity = .3,
+    rotateRatio = 1,
+    fontWeight = "bold"
+  )
+```
+
+```{r}
+word_len_cloud.plot_3
+```
+
+As expected these words are a compensation between the conciseness of deep meanings of short words and the thematic characteristics of the long words. Words like "مجاهد" (Mujahid), "وشعبه" (and his people) are clearly patriotic; whereas other words such 
+as "حرمان" (deprivation), "نصيبه" (his share) are strong wording carrying social meanings.
+
+```{r}
+rm("word_len_cloud")
+rm("word_len_cloud.plot")
+rm("word_len_cloud.plot_2")
+rm("word_len_cloud.plot_3")
+```
+
+Next we do a finer study of the distribution of word length per decade.
+```{r}
+word_length_per_decade <- songs.proc %>%
+  dplyr::select(Decade, Word) %>%
+  na.omit() %>%
+  #distinct() %>%
+  group_by(Decade) %>%
+  mutate(word_len = nchar(Word))
+```
+
+```{r}
+h <- hist(
+  word_length_per_decade$word_len, 
+  breaks = seq(0, max(word_length_per_decade$word_len), 1), 
+  plot = F
+)
+
+max.h.count <- max(h$counts)
+ 
+word_length_per_decade <- within(
+  word_length_per_decade,
+  Decade <- factor(
+    Decade, 
+    levels = c("Late 1940s" , "Early 1950s", "Late 1950s", "Early 1960s", "Late 1960s", "Early 1970s", "Late 1970s", "Early 1980s", "Late 1980s")
+  )
+)
+```
+
+
+```{r}
+word_length_per_decade$mean <- rep(0, nrow(word_length_per_decade))
+word_length_per_decade$std <- rep(1, nrow(word_length_per_decade))
+```
+
+
+```{r}
+grid <- with(
+  word_length_per_decade, 
+  seq(min(word_len), max(word_len), length.out = 150))
+
+dens <- plyr::ddply(
+  word_length_per_decade, 
+  "Decade", 
+  function(x) {
+    data.frame(
+      value = grid,
+      density = dnorm(grid, mean(x$word_len), sd(x$word_len))
+  )
+})
+
+dnorm_params <- word_length_per_decade %>%
+  group_by(Decade) %>%
+  mutate(mean = round(mean(word_len), digits = 2), std = round(sd(word_len), digits = 2)) %>%
+  dplyr::select(Decade, mean, std) %>%
+  distinct()
+```
+
+The following figure shows the distribution of the word lengths over the decades overlayed with a fitting normal distribution. In each plot the mean and the standard deviation of the normal distribution are shown.
+```{r}
+word_length_per_decade.plot <- word_length_per_decade %>%
+  ggplot() + 
+  geom_histogram(
+    aes(x = word_len, y = ..density.., fill = ..count..),
+    binwidth = 0.5
+  ) +
+  facet_wrap(~Decade, scales = "free") + 
+  geom_line(data = dens, aes(x = value, y = density), color = "red", alpha = 0.5) + 
+  theme_bw() + 
+  #labs(title = "dff")
+  # theme(
+  #   plot.title = element_text(hjust = 0.5),
+  #   legend.title = element_blank(),
+  #   panel.grid.minor = element_blank(),
+  #   text = element_text(size = 9)
+  # ) +
+  geom_text(
+    data = dnorm_params, 
+    aes(x = 11, y = 0.2, label = paste("Mean = ", mean, "\n", "Std = ", std)), 
+    inherit.aes = FALSE
+  ) + 
+  xlab("Word Length") +
+  scale_x_continuous(breaks = function(x) unique(floor(pretty(seq(0, (max(x) + 1) * 1.1, 1))))) +
+  ggtitle("Distribution of Word Length per Decade") #+
+  #theme_update(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+word_length_per_decade.plot
+```
+As indicated, even though the normal distribution might not be the the best fit, all the histograms have almost the same empirical normal distribution which is parameterized by both the mean and standard deviation. The histograms by themselves are very similar as well.
+This implies that Shadia was very much coherent about her singing style including the choice of music and lyrics throughout her entire career life with not much of radical changes. The vast majority of words have lengths $4$ or $5$. Large portion
+of these words were uttered between early 1950s till mid 1960s. 
+
+```{r}
+# orca(word_length_per_decade.plot, file = "./figs/word_length_per_decade.pdf")
+ggsave("./figs/word_length_per_decade.pdf", word_length_per_decade.plot, dpi = 1000, device = "pdf")
+```
+
+```{r}
+rm("word_length_per_decade")
+rm("word_length_per_decade.plot")
+```
+
+## Lexical diversity
+
+The more varied vocabulary a text possesses, the higher its **lexical diversity**. Song vocabulary can be seen as a representation of how many unique words are used in a song. This can be shown with a simple graph of the average unique words per song over the decades/years.
+```{r}
+lex_diversity_per_year <- songs.proc %>%
+  dplyr::filter(!is.na(Decade)) %>%
+  dplyr::filter(!is.na(Year)) %>%
+  group_by(Song, Year) %>%
+  summarise(lex_diversity = n_distinct(Word)) %>%
+  arrange(desc(lex_diversity))
+```
+
+```{r}
+lex_diversity_per_year.plot <- lex_diversity_per_year %>%
+  ggplot(aes(x = Year, y = lex_diversity)) +
+  geom_point(
+    alpha = 0.4,
+    color = "darkblue",
+    size = 2,
+    position = "jitter"
+  ) +
+  stat_smooth(
+    color = "black", 
+    se = TRUE,  # display confidence interval around smooth
+    method = "lm"  # smoothing method
+  ) + 
+  geom_smooth(
+    aes(x = Year, y = lex_diversity),
+    se = TRUE,
+    color = "red",
+    lwd = 1
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45),
+    text = element_text(size = 10)
+  ) +
+  ggtitle("Lexical Diversity") +
+  xlab("") + 
+  ylab("") +
+  scale_x_continuous(breaks = seq(min(lex_diversity_per_year$Year), max(lex_diversity_per_year$Year), 1)) +
+  scale_y_continuous(breaks = seq(0, max(lex_diversity_per_year$lex_diversity), 20)) 
+  # #scale_color_manual(values = my_colors) +
+  # #theme_lyrics()
+```
+
+
+```{r}
+lex_diversity_per_year.plot
+```
+It is clear that the lexical diversity is almost constant over the whole career of Shadia, with a small increasing tendency over the years, again, enforcing the previous hypothesis that Shadia was very coherent, and possibly conservative, in her singing style, including her choice of music and lyrics.
+This is emphasized as well by the other smoothing curve which is generated using the loess method (Local Polynomial Regression Fitting).
+The confidence interval is narrow indicating very high confidence in the linear modeling of the data, it just widens towards the terminating years; this is expected as the sample points, that is the number of songs, are very small towards the end of her career life.
+There are some anomalous songs with very high and very low lexical diversity and it is noticeable that these are mostly in the early to middle part of her career life.
+It is apparent that during the early 1960s (which can be considered the middle of Shadia's career), there is a greater diversity in lyrics. This hype of artistic activity can also be seen from the figure above showing the histogram of word lengths per decade, particularly, during the 1960s. This might seem to coincide with the upheaval in social, cultural, political changes happening in Egypt and the Arab World (and actually the whole world) at this time. 
+
+The slope of the linear model can be computed as $\frac{57 - 43.81}{1986 - 1948} = 0.35$, which can be roughly be interpreted as there is an increase of about one third of a word per year in the lyrics of Shadia.
+
+```{r}
+#orca(lex_diversity_per_year.plot, file = "./figs/lex_diversity_per_year.pdf")
+ggsave("./figs/lex_diversity_per_year.pdf", lex_diversity_per_year.plot, dpi = 1000, device = "pdf")
+```
+In order to have better visualization of lexical diversity, we redraw it after removing anomalous songs, that is, songs that are either too long or too short. We consider $100$ as a threshold for large anomalies and $10$ as the threshold for small anomalies. That is,
+we only keep songs with lexical diversity between $10$ and $100$
+
+```{r}
+lex_diversity_per_year_2 <- lex_diversity_per_year %>%
+  filter(lex_diversity < 100 && lex_diversity > 10)
+```
+
+```{r}
+lex_diversity_per_year.plot_2 <- lex_diversity_per_year_2 %>%
+  ggplot(aes(x = Year, y = lex_diversity)) +
+  geom_point(
+    alpha = 0.4,
+    color = "darkblue",
+    size = 2,
+    position = "jitter"
+  ) +
+  stat_smooth(
+    color = "black", 
+    se = TRUE,  # display confidence interval around smooth
+    method = "lm"  # smoothing method
+  ) + 
+  geom_smooth(
+    aes(x = Year, y = lex_diversity),
+    se = TRUE,
+    color = "red",
+    lwd = 1
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45),
+    text = element_text(size = 10)
+  ) +
+  ggtitle("Lexical Diversity after Removing Anomalies") +
+  xlab("") + 
+  ylab("") +
+  scale_x_continuous(breaks = seq(min(lex_diversity_per_year$Year), max(lex_diversity_per_year$Year), 1)) +
+  scale_y_continuous(breaks = seq(0, max(lex_diversity_per_year$lex_diversity), 5)) 
+  # #scale_color_manual(values = my_colors) +
+  # #theme_lyrics()
+```
+
+```{r}
+lex_diversity_per_year.plot_2
+```
+
+As seen, specially, from the linear smoother of the plot, that the lexical diversity has very small positive slope. The slope can be computed as $\frac{51.37 - 43.84}{1986 - 1948} \approx 0.2$, which roughly means that every year, there is an increase of less than
+one fifth of a word per year in the lyrics of Shadia. So, she is very much consistent during her career life regarding her choice of lyrics lengths in her songs, at least, with regard to the lexical diversity.
+
+```{r}
+ggsave("./figs/lex_diversity_per_year_2.pdf", lex_diversity_per_year.plot_2, dpi = 1000, device = "pdf")
+```
+
+Instead of removing the anomalies we do a smoother version of the plot by drawing only one point per year which summarizes the lexical diversity across all songs in the same year in one number, namely, the mean value.
+```{r}
+lex_diversity_per_year_3 <- lex_diversity_per_year %>%
+  group_by(Year) %>%
+  summarise(av_lex_diversity = mean(lex_diversity)) %>%
+  arrange(desc(av_lex_diversity))
+```
+
+```{r}
+lex_diversity_per_year.plot_3 <- lex_diversity_per_year_3 %>%
+  ggplot(aes(x = Year, y = av_lex_diversity)) +
+  geom_point(
+    alpha = 0.4,
+    color = "darkblue",
+    size = 2,
+    position = "jitter"
+  ) +
+  stat_smooth(
+    color = "black", 
+    se = TRUE,  # display confidence interval around smooth
+    method = "lm" # smoothing method
+  ) + 
+  geom_smooth(
+    aes(x = Year, y = av_lex_diversity),
+    se = TRUE,  # display confidence interval around smooth
+    color = "red",
+    lwd = 1
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45),
+    text = element_text(size = 10)
+  ) +
+  ggtitle("Average Lexical Diversity") +
+  xlab("") + 
+  ylab("") +
+  scale_x_continuous(breaks = seq(min(lex_diversity_per_year_2$Year), max(lex_diversity_per_year_2$Year), 1)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 20))
+  # #scale_y_continuous(breaks = seq(min(lex_diversity_per_year_2$av_lex_diversity),
+  #  #                               max(lex_diversity_per_year_2$av_lex_diversity), 20)) 
+```
+
+```{r}
+lex_diversity_per_year.plot_3
+```
+
+So, the graph shows only one point per year. Because of the smoothing effect of the mean operator, the number of anomalies have gone done. The slope of the linear estimator is:$\frac{58.68 - 47.09}{1986 - 1948} = 0.31$, 
+which roughly means that there is an increase of less than one third of a word per year in the lyrics of Shadia. This is very much consistent with the previous results. Generally, her longest lyrics are performed during the 1960s. 
+The loess curve estimation is more bumpy than above and the confidence intervals for both 
+the linear and loess estimators are larger. This indicates that though the estimators show a precise general trend of the lexical diversity, they are less certain considering the finer details.
+
+```{r}
+ggsave("./figs/lex_diversity_per_year_3.pdf", lex_diversity_per_year.plot_3, dpi = 1000, device = "pdf")
+```
+
+```{r}
+rm("lex_diversity_per_year")
+rm("lex_diversity_per_year.plot")
+rm("lex_diversity_per_year_2")
+rm("lex_diversity_per_year.plot_2")
+```
+
+In all of the above we have studied the lyrics words and lexical diversity using absolute measures. A more illuminating picture can be obtained using relativistic measures such as lexical density, which is a normalized lexical diversity.
+
+## Lexical density
+
+**Lexical density** is defined as the number of unique words in a song divided by the total number of words in that song.
+This is an indicator of *word repetition*, which is an important tool for the lyricist songwriter's tool. 
+As lexical density increases, repetition decreases.
+
+Note that this does not imply *sequential repetition*, which is yet another songwriting trick. In the following we will investigate the lexical diversity of Shadia's songs.
+
+```{r}
+lex_density_per_year <- songs.proc %>%
+  dplyr::filter(!is.na(Decade)) %>%
+  dplyr::filter(!is.na(Year)) %>%
+  dplyr::select(Song, Year, Word) %>%
+  group_by(Year, Song) %>%
+  summarise(lex_density = n_distinct(Word)/n()) %>%
+  arrange(desc(lex_density))
+```
+
+```{r}
+# Computing the average.
+overall_av_density <- mean(lex_density_per_year$lex_density)
+cat("The overall average desnity is: ", overall_av_density, "\n")
+```
+
+
+```{r}
+density_plot <- lex_density_per_year %>%
+  ggplot(aes(Year, lex_density)) +
+  geom_point(
+    color = "darkblue",
+    alpha = .4,
+    size = 2,
+    position = "jitter"
+  ) +
+  stat_smooth(
+    color = "black",
+    se = TRUE,  # display confidence interval around smooth
+    method = "lm" # smoothing method
+  ) +
+  geom_smooth(
+    aes(x = Year, y = lex_density),
+    se = TRUE,
+    color = "red",
+    lwd = 1
+  ) +
+  geom_hline(
+    yintercept = overall_av_density, 
+    color = "darkgreen", 
+    linetype = "dashed"
+  ) + 
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45),
+    text = element_text(size = 10)
+  ) +
+  ggtitle("Lexical Density") +
+  xlab("") +
+  ylab("") +
+  scale_x_continuous(breaks = seq(min(lex_density_per_year$Year), max(lex_density_per_year$Year), 1)) +
+  scale_y_continuous(breaks = seq(0, max(lex_density_per_year$lex_density) + 1, 0.1))
+```
+
+```{r}
+density_plot
+```
+It is noticable that most of the songs has lexical density above $0.6$ which shows the richness of the lyrics contents of Shadia's songs. There is slight decline in the density over time which an be quantified using the linear estimator as: 
+$\frac{0.77 - 0.57}{1986 - 1948} = 0.005$ which means that the density decreases by $0.5\%$ per year which is very small amount.
+Of course the number of samples decreases overtime as singing activity was high in Shadia's beginning till mid-career and started to decline afterwards. The density points can be roughly seen to distribute uniformly over the interval $[0.4,1]$ almost every year. 
+The green dashed line gives the overall average of the density across all the songs in the corpus which turned out to be around $0.706$.
+
+Similarly, the loess estimator is overlaid over the line regressor. This is very surprising result about how Shadia used to choose her lyrics and the balance between short and long songs as well as dense and sparse lyrics.
+It seems that this was intentional from her side, and may indicate the diversity of singing media such as songs in movies, in the Radio, theater, etc.
+There are extreme cases regarding the lexical density as seen by very dense songs and very sparse songs. Examples of the former include: "خدني علي حصانك" (take me on your horse) in 1973, and "ربينا يبسطنا" (May God please us) in 1952.
+Examples of very sparse songs include: "العنب" (the grapes) in 1965, and "خلاص مسافر" (It's okay traveler) in 1972.
+
+
+```{r}
+ggsave("./figs/density_plot.pdf", density_plot, dpi = 1000, device = "pdf")
+```
+
+Next we smooth the previous figure by aggregating the songs in any given year by one number representing the average density of the songs in that year.
+```{r}
+lex_density_per_year_2 <- lex_density_per_year %>%
+  group_by(Year) %>%
+  summarise(av_lex_density = mean(lex_density)) %>%
+  arrange(desc(av_lex_density))
+```
+
+```{r}
+# temp <- lex_density_per_year_2 %>%
+#   filter(av_lex_density >= 0.9) 
+```
+
+
+```{r}
+density_plot_2 <- lex_density_per_year_2 %>%
+  ggplot(aes(Year, av_lex_density)) +
+  geom_point(
+    color = "darkblue",
+    alpha = .4,
+    size = 2,
+    position = "jitter"
+  ) +
+  stat_smooth(
+    color = "black",
+    se = TRUE,  # show the confidence interval
+    method = "lm" # the smoothing method
+  ) +
+  geom_smooth(  # default using loess method
+    aes(x = Year, y = av_lex_density),
+    se = TRUE,  # show the confidence interval
+    color = "red",
+    lwd = 1
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45),
+    text = element_text(size = 10)
+  ) +
+  ggtitle("Average Lexical Density") +
+  xlab("") + 
+  ylab("") +
+  scale_x_continuous(breaks = seq(min(lex_density_per_year$Year), max(lex_density_per_year$Year), 1)) +
+  scale_y_continuous(breaks = seq(0, max(lex_density_per_year_2$av_lex_density) + 1, 0.1)) 
+```
+
+```{r}
+density_plot_2
+```
+So every year during Shadia's career life is characterized by one point that is the average of the lexical density of all songs performed by her in that year. The plot goes in accordance with the previous one with a slight decline of the slope of the linear estimator
+that can be quantified as: $\frac{0.76 - 0.57}{1986 - 1948} = 0.005$, which is exactly the same as the previous graph and indicates that on average there is an $0.05\%$ decrease in average density per year. The confidence interval is narrowest in the middle as data are 
+bigger and pre and post data allow for better predictability. The loess curve goes as well in hand with the line estimator and the data. The average operator really smooeth out the previous curve, except at the last year with an anomaly of too short density, indicating
+again that Shadia was very balanced in her choice of lyrics, and probably her singing themes.
+
+
+```{r}
+rm("lex_density_per_year")
+rm("density_plot")
+rm("lex_density_per_year_2")
+rm("density_plot_2")
+```
+
+
+Next we study the evolution of both lexical diversity and lexical density per decade to have a closer finer look and how they co-evolve together.
+```{r}
+lex_diversity_over_decade <- songs.proc %>%
+  dplyr::filter(!is.na(Decade)) %>%
+  dplyr::filter(!is.na(Year)) %>%
+  dplyr::select(Decade, Song, Word) %>%
+  group_by(Decade, Song) %>%
+  summarise(lex_diversity = n_distinct(Word)) %>%
+  ungroup() %>%
+  dplyr::select(Decade, lex_diversity) %>%
+  group_by(Decade) %>%
+  summarise("Mean lex diversity" = mean(lex_diversity))
+```
+
+```{r}
+lex_density_over_decade <- songs.proc %>%
+  dplyr::filter(!is.na(Decade)) %>%
+  dplyr::filter(!is.na(Year)) %>%
+  dplyr::select(Decade, Song, Word) %>%
+  group_by(Decade, Song) %>%
+  mutate(lex_diversity = n_distinct(Word)) %>%
+  mutate(no_words = n()) %>%
+  ungroup() %>%
+  dplyr::select(-c(Song, Word)) %>%
+  distinct() %>%
+  mutate(lex_density = lex_diversity/no_words) %>%
+  group_by(Decade) %>%
+  summarise("Mean lex density" = mean(lex_density))
+```
+
+```{r}
+lex_diversity_density_over_decade <- inner_join(lex_diversity_over_decade,
+                                                lex_density_over_decade,
+                                                by = "Decade")
+
+# lexical density values lie in the range [0,1], however, for proper plotting and comparison with lexical diversity in bar plots,
+# we multiply the values of lexical density by 100.
+lex_diversity_density_over_decade$"Mean lex density" <- 100 * lex_diversity_density_over_decade$"Mean lex density"
+```
+
+The following cell is just a trick for proper plotting of the two measures (lexical diversity and lexical density) in one bar plot.
+```{r}
+lex_diversity_density_over_decade <- lex_diversity_density_over_decade %>%
+  gather("lex_div_den", "value", -Decade)
+```
+
+
+```{r}
+lex_diversity_density_over_decade <- lex_diversity_density_over_decade %>%
+  mutate(years = as.numeric(parse_number(Decade))) %>%
+  mutate(part = ifelse(grepl("Early", Decade), 0, 1))
+```
+
+```{r}
+lex_diversity_density_over_decade <- lex_diversity_density_over_decade %>%
+  arrange(years, part) %>%
+  dplyr::select(-c(years, part))
+```
+
+```{r}
+#X <- lex_diversity_density_over_decade$value[which(lex_diversity_density_over_decade$lex_div_den == "Mean lex density")]
+#exp_d <- fitdist(X, "exp")
+```
+
+```{r}
+songs.lex_diversity_density_over_decade <- within(
+  lex_diversity_density_over_decade, 
+  Decade <- factor(Decade, levels = c("Late 1940s" , "Early 1950s", "Late 1950s", "Early 1960s", "Late 1960s", "Early 1970s", "Late 1970s", "Early 1980s", "Late 1980s"))
+)
+```
+
+
+```{r}
+lex_diversity_density_over_decade.plot <- lex_diversity_density_over_decade %>%
+  ggplot() + 
+  geom_bar(aes(x = factor(Decade, levels = unique(Decade)), y = value, fill = lex_div_den),
+           stat = "identity",
+           position = "dodge") +
+  theme(plot.title = element_text(hjust = 0.5), 
+         legend.title = element_blank(),
+         panel.grid.minor = element_blank(), 
+         axis.text.x = element_text(angle = 40),
+         text = element_text(size = 10)) +
+  xlab("") + 
+  ylab("") +
+  ggtitle("Lexical Diversity/Density over the Decades") + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10))
+
+lex_diversity_density_over_decade.plot <- ggplotly(lex_diversity_density_over_decade.plot)
+```
+
+```{r}
+lex_diversity_density_over_decade.plot
+```
+
+The previous graph shows a bar plot comparing the evolution of the mean diversity and mean density over the decades of Shadia's career life. In order to have proper scale for the two plots together the density is shown in percentage rather than a fraction, so it is on the same 
+scale as the lexical diversity.
+It is worth observing that the average lexical density is highest in the beginning and ending of Shadia's career life and lowest in the end. So its distribution resembles an inverted Gaussian curve. The lowest point was during the late 1960s.
+On the other hand, lexical diversity shows the opposite behavior to that of the lexical density, which indicates that lexical diversity comes in long songs rather than in short ones, which explains why the density decreases with the increase in diversity.
+Lexical diversity is highest in the early 1960s. From the figure above of distribution of song length per decade, the longest songs appear in the early 1960s which conincdes with the highest diversity in the current bar plot but one of the lowest densities across decades
+which implies that the long song has so many repetitions.
+
+
+```{r}
+orca(lex_diversity_density_over_decade.plot, file = "./figs/div_density_over_decade.pdf")
+# ggsave("./figs/div_density_over_decade.pdf", lex_diversity_density_over_decade.plot, dpi = 1000, device = "pdf")
+```
+
+```{r}
+rm("lex_diversity_over_decade")
+rm("lex_density_over_decade")
+rm("lex_diversity_density_over_decade")
+rm("lex_diversity_density_over_decade.plot")
+```
+
+## TF-IDF
+
+The method that we have been using so far looks at the entire dataset, but it has not addressed how to quantify just how important various terms are in a document with respect to an entire collection. In the analysis above we have removed stopwords and looked at term frequency,
+but this is not the most sophisticated approach, especially from a relativistic perspective. An advanced alternative is the use of **TF-IDF**, where TF stands for "Term Frequency" and IDF stands for "Inverse Term Frequency". TF-IDF assigns a lower weight to commonly used words 
+and higher weights to words that are not used much in the given collection.
+
+When TF and IDF are combined, a term's significance is adjusted for how rarely it is used. The assumption behind TF-IDF is that **terms that appear more frequently in a document should be given a higher weight, unless it also appears in many documents**. It can be formulated as
+follows: 
+
+- Term Frequency (TF): Number of times a term occurs in a document (fixing the document). 
+- Document Frequency (DF): Number of documents that contain each word (fixing the word). 
+- Inverse Document Frequency (IDF) = 1/DF 
+- TF-IDF = TF * IDF
+
+The IDF of any term is therefore a higher number for words that occur in fewer of the documents in the collection, so it is a kind of rare words from which their importance are driven. 
+We will next see this approach to examine the most important words per year/decade/and overall.
+
+```{r}
+popular_tfidf_words <- songs.proc %>%
+  dplyr::select(Song, Word) %>%
+  filter(!is.na(Song)) %>%
+  filter(!is.na(Word)) %>%
+  dplyr::filter(nchar(Word) > 3) %>%
+  group_by(Song) %>%
+  count(Song, Word, sort = TRUE) %>%
+  ungroup() %>%
+  bind_tf_idf(Word, Song, n) %>%
+  arrange(desc(tf_idf)) %>%
+  na.omit()
+```
+
+```{r}
+popular_tfidf_words <- popular_tfidf_words %>% 
+  dplyr::select(-n)
+```
+
+The following table gives the topmost words with respect to their TF-IDF values.
+```{r}
+topmost <- 10
+
+test_sample <- popular_tfidf_words[1:topmost,]  %>%
+  ungroup() %>%
+  kable(align = "c") %>%
+  kable_paper() %>% 
+  column_spec(1, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "orange") %>%
+  column_spec(2, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "lightblue") %>%
+  column_spec(3, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "orange") %>%
+  column_spec(4, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "lightblue") %>%
+  column_spec(5, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "orange")
+```
+
+```{r}
+test_sample
+```
+
+As can be noticed from this table it is clear that the words are not that typical of songs, especially from a singer mostly known for romantic themes. 
+So these words are rare across songs, however, they are very typical in few songs. The topmost words include: "لولي", (lollipop stone), "اصرار", (insistence), "حلال" (halal), "my lemonade", "يا زمن" (Oh time). 
+
+The following shows the converse, namely the words with least TF-IDF values, which are words that are either very atypical in any particular song or very typical across many songs.
+The following table gives the lowermost words with respect to their TF-IDF values.
+```{r}
+lowermost <- 10
+
+test_sample <- tail(popular_tfidf_words, n = lowermost)  %>%
+  map_df(rev) %>%
+  ungroup() %>%
+  kable(align = "c") %>%
+  kable_paper() %>% 
+  column_spec(1, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "orange") %>%
+  column_spec(2, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "lightblue") %>%
+  column_spec(3, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "orange") %>%
+  column_spec(4, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "lightblue") %>%
+  column_spec(5, 10, color="black", width = "20em", bold = TRUE, italic = FALSE, background = "orange")
+```
+
+```{r}
+test_sample
+```
+
+As expected the terms with the lowest TF-IDF are the very common words that can appear frequently inside a given song and appear across many songs. 
+There include "قلبي", (my heart), "واحنا", (and us), "كفايه" (enough), "بينا" (between us).
+
+Estimation of the tf-idf distribution using right-skewed normal as well as normal distribution.
+```{r}
+# See https://community.rstudio.com/t/how-can-we-create-right-left-skewed-normal-distribution-curve-in-r/39115
+# Fitting to a right skewed normal distribution. 
+#param_sndist <- snormFit(popular_tfidf_words$tf_idf)
+
+# Fitting to a normal distribution.
+#fit <- fitdistr(popular_tfidf_words$tf_idf, "normal")
+#param_ndist <- fit$estimate
+```
+
+
+The following figure shows a histogram for the distribution of the tf-idf values across all the lyrics corpus, overlaid with normal and right-skewed density estimation. 
+```{r}
+sample_mean = round(mean(popular_tfidf_words$tf_idf), 2)
+
+popular_tfidf_words.plot <- popular_tfidf_words %>%
+  ggplot() + 
+  geom_histogram(
+    aes(x = tf_idf),
+    stat = "density",
+    color = "darkblue",
+    size = 0.15) + 
+  geom_vline(
+    xintercept = sample_mean, 
+    color = "red", 
+    linetype = "dashed"
+  ) + 
+  geom_text(
+    aes(x = 0.2, y = 9), 
+    color = "red",
+    label = paste("Mean = ", as.character(sample_mean)
+                  ),
+    hjust = 1, 
+    size = 3
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    text = element_text(size = 10)) +
+  ggtitle("Normalized Histogram for TF-IDF Values") + 
+  xlab("") + 
+  ylab("") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+```
+
+```{r}
+popular_tfidf_words.plot
+```
+
+It is clear that almost all the words in the corpus have tf-idf values below $0.5$. The empirical mean of the tf-idf values is $0.11$. However, to have a better view of the data distribution we resort to boxplots.
+
+
+
+```{r}
+# Ploting a boxplot for the distribution of word frequencies.
+
+#The graph will be plotted for logrithm of frequencies for proper visualization as most of the data re on the lower quantiles.
+
+
+qu = quantile(popular_tfidf_words$tf_idf)
+
+
+# plot_ly(x = log(word_freqs), name = "Word Frequency (log scale)") %>% 
+#   add_boxplot(hoverinfo = "x") %>%
+#   layout(xaxis = list(hoverformat = ".2f")) #%>%
+
+tf_idf_boxplot <- plot_ly(x = popular_tfidf_words$tf_idf, 
+        name = "TF-IDF") %>%
+  add_boxplot(hoverinfo = "x") %>%
+  layout(xaxis = list(hoverformat = ".2f")) #%>%
+
+tf_idf_boxplot
+```
+
+The boxplot indicates that the upper fence, which cordons off outliers from the bulk of data is about $0.23$. So all higher tf-idfs are beyond $0.23$. The maximum as indicated in the table above is $2.63$. So quite few words are significant in the sense of having
+large tf-idf, in addition to be well separated from the large majority of the other tokens in the corpus.
+
+```{r}
+# orca(popular_tfidf_words.plot, file = "./figs/popular_tfidf_words.pdf")
+ggsave("./figs/popular_tfidf_words.pdf", popular_tfidf_words.plot, dpi = 1000, device = "pdf")
+#ggsave("./figs/tf_idf_boxplot.pdf", tf_idf_boxplot, dpi = 1000, device = "pdf")
+orca(tf_idf_boxplot, file = "./figs/tf_idf_boxplot.pdf")
+```
+
+The following is a word cloud of the most popular words (according to the TF-IDF measure) across the whole artistic career of Shadia.
+```{r}
+word_cloud_overall <- popular_tfidf_words %>%
+  arrange(desc(tf_idf)) %>%
+  dplyr::select(Word, tf_idf)
+```
+
+```{r}
+tf_idf_wcloud <- word_cloud_overall %>%
+  wordcloud2(
+    gridSize = 10,
+    size = 0.15,
+    minSize = .0005,
+    ellipticity = .3,
+    rotateRatio = 1,
+    fontWeight = "bold"
+  )
+  
+#   wordcloud2(
+#   word_cloud_overall[1:300, ],
+#   color = "random-dark", 
+#   minRotation = -pi / 6, 
+#   maxRotation = -pi / 3, 
+#   minSize = .002, 
+#   ellipticity = .3, 
+#   rotateRatio = 1, 
+#   size = .2, 
+#   fontWeight = "bold", 
+#   gridSize = 1.5
+# )
+
+
+
+tf_idf_wcloud
+```
+
+Compared with the word cloud shown above based on just term frequency, there is a radical change (also seen from the boxplot) that very few words are important/significant when considering this information-theoretic tf-idf measure.
+
+```{r}
+rm("popular_tfidf_words")
+rm("test_sample")
+rm("word_cloud_overall")
+rm("popular_tfidf_words.plot")
+rm("tf_idf_wcloud")
+```
+
+Next we do that analysis more finer by dividing it into the decades. So here the TF-IDF values are computed with respect only to the given decade.
+```{r}
+popular_tfidf_words_per_decade <- songs.proc %>%
+  dplyr::select(Decade, Song, Word) %>%
+  dplyr::filter(nchar(Word) > 3) %>%
+  dplyr::filter(!is.na(Decade)) %>%
+  group_by(Decade, Song) %>%
+  count(Decade, Song, Word, sort = TRUE) %>%
+  ungroup() %>%
+  group_by(Decade) #%>%
+  #bind_tf_idf(Word, Song, n) #%>%
+  # arrange(desc(tf_idf))
+```
+
+```{r}
+decades <- popular_tfidf_words_per_decade %>% group_split()
+decades_after <- NULL
+decades_wordclouds <- list()
+```
+
+
+
+```{r}
+for(i in 1:length(decades)) {
+  dd <- decades[[i]] %>%
+    group_by(Song) %>%
+    bind_tf_idf(Word, Song, n)
+  decades_after <- rbind(decades_after, dd)
+  
+  decades_wordclouds[[i]] <- dd[1:300,] %>%
+    ungroup() %>%
+    dplyr::select(Word, tf_idf) %>%
+    arrange(desc(tf_idf))
+   
+  decades_wordclouds[[i]] <- wordcloud2(
+    decades_wordclouds[[i]],
+    gridSize = 10,
+    size = 0.15,
+    minSize = .0005,
+    ellipticity = .3,
+    rotateRatio = 1,
+    fontWeight = "bold"
+  )
+}
+```
+
+```{r}
+no_of_top_words <- 10
+
+popular_tfidf_words_per_decade <- decades_after %>%
+  distinct() %>%
+  group_by(Decade) %>%
+  arrange(desc(tf_idf), .by_group = TRUE) %>%
+  slice(seq_len(no_of_top_words)) 
+```
+
+```{r}
+popular_tfidf_words_per_decade <- within(
+  popular_tfidf_words_per_decade, 
+  Decade <- factor(
+    Decade, 
+    levels = c("Late 1940s" , "Early 1950s", "Late 1950s", "Early 1960s", "Late 1960s", "Early 1970s", "Late 1970s", "Early 1980s", "Late 1980s")))
+```
+
+```{r}
+top_tf_idf_words_per_decade.plot <- popular_tfidf_words_per_decade %>%
+  ggplot()  +
+  #geom_col(aes(x = Word, y = tf_idf), width = 0.6) +
+  ##geom_col(aes(x = factor(Word, levels = unique(Word)), y = freq), width = 0.6) + 
+  ##geom_col(aes(x = Word, y = freq), width = 0.6) + 
+  geom_col(
+    aes(x = reorder_within(Word, tf_idf, Decade), y = tf_idf),
+    width = 0.6) +
+  ##geom_col(aes(x = .r, y = freq), width = 0.6) + 
+  facet_wrap(~Decade, scales = "free") +
+  scale_x_reordered() + 
+  ##scale_x_continuous(breaks = top_words_per_decade$Word, labels = top_words_per_decade$Word)
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 40),
+    text = element_text(size = 8),
+    panel.spacing = unit(0.5, "lines")
+  ) +
+  coord_flip() + 
+  guides(fill = FALSE) + 
+  ggtitle("Important Words Using TF-IDF per Decade") + 
+  labs(x = "Word", y = "TF-IDF") +
+  scale_y_continuous(breaks = seq(0, 2, 0.2))
+
+top_tf_idf_words_per_decade.plot <- ggplotly(top_tf_idf_words_per_decade.plot)
+```
+
+```{r}
+top_tf_idf_words_per_decade.plot
+```
+
+<mark> %%% wg: Similar problem in this figure to the one above that not all plots have the same scale/size </mark>
+
+For every decade the plot shows the top $10$ words with respect to the TF-IDF measure.
+Relativizing the computation of the TF-IDF to a decade gives a glimpse over the general themes and genres as well as the richness of meanings of songs that distinguish every such decade.
+As can be seen the popular words (with respect to the TF-IDF measure) are quite different across different decades. 
+Even the TF-IDF values can significantly be different across different decades.
+
+In every decade only one or two dominating terms with very high TF-IDF values, and then the rest of the top words radically smaller with almost the same values. The highest TF-IDF values occur mostly during the 1960s which coincided with a strong surge 
+in the artistic and cultural activities that accompanied progressive policies, such as socialism and liberation from colonialism, in Egypt and many parts of the Arab World, and the third world in general. So lyrical terms carry strong and significant meanings emerged in
+this period. Example of top TF-IDF terms per decades include: "حلال" (halal) in early 1950s, "اصرار" (insistence) in late 1960s, "بلادي" (my country) in early 1970s
+"باحبك"  (I love you) in late 1970s, "وداع" (farewell) in early 1980s. The smallest TF-IDF values can be spotted in the Late 1940s, Late 1970s, and Late 1980s. These are essentially to due the scarcity of songs in these periods as indicated above by the graph on the 
+distribution of frequency of songs over the decades. <mark> %%% wg: give proper reference to the graph in the paper. I am not sure we can reference here in this note.</mark>
+
+Generally, the lyrical terms of Shadia seems more into the language of the workers and farmers in Egypt, rather than directed to the middle class, like, for example, those of Abdel Halim. Her lyrics words are very simple, except with some more complex words
+in nationalistic and/or patriotic songs.
+
+The word "لولي" (lollipop stone) and a derivative of it appear as top (TF-IDF) terms in Early 1950s and Early 1960s. The word "الله" (ALAAH/GOD) appear amonsgest the top words in the Early 1960s and Early 1970s.
+The Early 1970s witnessed several terms that carry nationalistic/patriotic themes such as "بلادي" (my country), "يا مصر" (Oh Egypt), "خاين" (traitor); this may be due to the 1973 war against Israel and the strong feelings accompanying the war.
+
+```{r}
+orca(top_tf_idf_words_per_decade.plot, file = "./figs/top_tf_idf_words_per_decade.pdf")
+# ggsave("./figs/top_tf_idf_words_per_decade.pdf", top_tf_idf_words_per_decade.plot, dpi=1000, device="pdf")
+```
+
+The following is an illustration of word clouds, based on the TF-IDF metric, across all the dedaces.
+```{r}
+par(mfrow = c(3,2))
+decades_wordclouds[[1]]
+decades_wordclouds[[2]]
+decades_wordclouds[[3]]
+decades_wordclouds[[4]]
+decades_wordclouds[[5]]
+decades_wordclouds[[6]]
+decades_wordclouds[[7]]
+decades_wordclouds[[8]]
+decades_wordclouds[[9]]
+```
+
+```{r}
+rm("popular_tfidf_words_per_decade")
+rm("decades")
+rm("decades_after")
+rm("decades_wordclouds")
+```
+
+```{r}
+knitr::knit_exit()
+```
+
+
+# POS Analysis
+
+```{r}
+library(reticulate)
+use_condaenv(condaenv = "nlp", required = TRUE)
+```
+
+
+```{r}
+songs <- read.csv(
+  "./data/songs.csv", 
+  header = TRUE, 
+  sep = ",", 
+  stringsAsFactors = FALSE, 
+  encoding = "UTF-8", 
+  na.strings = ""  # Empty fields are replaced by NA.
+) 
+```
+
+```{python}
+from camel_tools.disambig.mle import MLEDisambiguator
+from camel_tools.tagger.default import DefaultTagger
+
+py_songs = r.songs
+```
+
+```{python}
+mled = MLEDisambiguator.pretrained()
+tagger = DefaultTagger(mled, 'pos')
+```
+
+```{python}
+py_songs["POS Tags"] = [tagger.tag(ly.split()) for ly in py_songs["Lyrics"]]
+```
+
+```{python}
+py_songs["POS Tags"]
+```
+
+```{python}
+import pandas as pd
+
+tags = ['noun', 'noun_prop', 'verb', 'prep', 'adj', 'part_voc', 'pron', 'noun_quant', 'conj']
+
+#py_songs["test"] = [pd.Series(p).value_counts() for p in py_songs["POS Tags"]] 
+py_songs["Feature Vector"] = [{t:p.count(t) for t in set(tags)} for p in py_songs["POS Tags"]]
+```
+
+```{python}
+py_songs["Feature Vector"][0]
+py_songs["Feature Vector"][10]
+py_songs["Feature Vector"][100]
+#py_songs["test"][0].to_dict()
+```
+
+In the following cell we extract the feature vectors based on POS features and put them into a 2-dim array.
+
+```{python}
+import numpy as np
+
+N = len(py_songs)
+M = len(tags)
+
+feature_matrix = np.zeros((N,M))
+
+for i in range(N):
+  feature_matrix[i,:] = list(py_songs["Feature Vector"][i].values())
+
+#ss[1,:] =list(py_songs["Feature Vector"][100].values())
+#ss = np.array(list(py_songs["Feature Vector"][100].values()))
+#ss
+#ss.shape
+
+feature_matrix
+```
+**Standardization**: Standardization scales, or shifts, the values for each numerical feature in the dataset so that the features have a mean of 0 and standard deviation of 1:
+```{python}
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import silhouette_score
+import matplotlib.pyplot as plt
+
+scaler = StandardScaler()
+scaled_feature_matrix = scaler.fit_transform(feature_matrix)
+
+scaled_feature_matrix
+```
+
+Applying the kmeans cluster algorithm.
+```{python}
+# no_clust = 3
+# 
+# kmeans = KMeans(
+#   init = "random",
+#   n_clusters = no_clust,
+#   n_init = 10,
+#   max_iter=300,
+#   random_state=42
+# )
+```
+
+```{python}
+#kmeans.fit(scaled_feature_matrix)
+```
+
+```{python}
+
+#plt.scatter(scaled_feature_matrix[:, 0], scaled_feature_matrix[:, 1], color="r")
+#plt.show()
+```
+
+We will apply the kmeams clustering method. But first we want to find the optimal numbr of clusters. For this we use two criteria: (1) the Elbow curve method and (2) Silhouette Analysis. 
+
+We start with the Elbow curve method.
+
+## Elbow method
+
+It is the most popular method for determining the optimal number of clusters. The method is based on calculating the Within-Cluster-Sum of Squared Errors (WSS) for different number of clusters (k) and selecting the k for which change in WSS first starts to diminish.
+The idea behind the elbow method is that the explained variation changes rapidly for a small number of clusters and then it slows down leading to an elbow formation in the curve. The elbow point is the number of clusters we can use for our clustering algorithm. Further details on this method can be found in this paper by Chunhui Yuan and Haitao Yang [https://www.mdpi.com/2571-8800/2/2/16/pdf].
+
+We will use the YellowBrick library for visualization and determination of the best value for the number of clusters $k$. It is a wrapper around Scikit-Learn.
+
+```{python}
+from yellowbrick.cluster import KElbowVisualizer
+from matplotlib.pyplot import savefig
+
+model = KMeans(
+  #init = "random",
+  n_init = 10,
+  max_iter = 1000
+)
+
+# k is range of number of clusters.
+visualizer = KElbowVisualizer(
+  model, 
+  k = (2,30), # range for the possible number of clusters
+  timings = True
+)
+
+visualizer.fit(scaled_feature_matrix)        # Fit data to visualizer
+
+visualizer.show()        # Finalize and render figure
+#savefig("./figs/elbow_figure.png", dpi = "figure")
+```
+
+The optimal value is $k = 9$.
+
+## Silhouette Coefficient
+
+The **Silhouette Coefficient** for a point $i$ is defined as follows:
+
+$$S(i) = \frac{b(i) - a(i)}{\max(a(i),b(i))}$$
+
+where $b(i)$ is the smallest average distance of point $i$ to all points in any other cluster and $a(i)$ is the average distance of $i$ from all other points in its cluster. 
+For example, if we have only 3 clusters A,B and C and $i$ belongs to cluster C, then $b(i)$ is calculated by measuring the average distance of $i$ from every point in cluster A, the average distance of $i$ from every point in cluster B and taking the smallest resulting value. The **Silhouette Coefficient** for the dataset is the average of the Silhouette Coefficient of individual points.
+
+The Silhouette Coefficient tells us if individual points are correctly assigned to their clusters. We can use the following thumb rules while using Silhouette Coefficient:
+$S(i)$ close to $0$ means that the point is between two clusters
+If it is closer to $-1$, then we would be better off assigning it to the other clusters
+If $S(i)$ is close to 1, then the point belongs to the ‘correct’ cluster
+For more details on this method, please refer to this 2018 paper by N. Kaoungku, K. Suksut , R. Chanklan and K. Kerdprasop (https://www.researchgate.net/publication/323588077_The_silhouette_width_criterion_for_clustering_and_association_mining_to_select_image_features). We will be using the KElbowVisualizer function to implement Silhouette Coefficient for K-means clustering algorithm:
+
+```{python}
+from yellowbrick.cluster import KElbowVisualizer
+from matplotlib.pyplot import savefig
+
+model = KMeans(
+  #init = "random",
+  n_init = 10,
+  max_iter = 1000
+)
+
+# k is range of number of clusters.
+visualizer = KElbowVisualizer(
+  model, 
+  k = (2,30), # range for the possible number of clusters
+  metric = "silhouette",
+  timings = True
+)
+
+visualizer.fit(scaled_feature_matrix)        # Fit data to visualizer
+
+visualizer.show()        # Finalize and render figure
+savefig("./figs/silhouette_figure.png", dpi = "figure")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{python}
+
+
+silhouette_avg = []
+for k in range(2,20):
+  kmeans = KMeans(
+    init = "random",
+    n_clusters = k, 
+    n_init = 10,
+    max_iter=1000
+  )
+  kmeans.fit(scaled_feature_matrix)
+  cluster_labels = kmeans.labels_
+  
+  sc = silhouette_score(scaled_feature_matrix, cluster_labels)
+  silhouette_avg.append(sc)
+
+plt.figure()
+plt.plot(range(2,20), silhouette_avg,"bx-")
+plt.xlabel("Values of K")
+plt.ylabel("Silhouette score")
+plt.title("Silhouette analysis For Optimal k")
+plt.show()
+```
+
+
+
+
+
+
+
+
+```{python}
+idx = [i for i in range(N) if kmeans.labels_[i] == 2]
+idx
+```
+
+```{python}
+ss = [py_songs["Song"][i] for i in range(N) if i in idx]
+ss
+```
+
+
+
+
+
+
+
+
+# Conclusion
+
+In this case study, we have taken a quick glance into the actual data.
+After performing some conditioning such as data cleansing and removing uninformative words, we began an exploratory analysis at the song level.
+Next, we delved deeper into text mining by unnesting lyrics into tokenized words so that we could look at lyrical complexity.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
